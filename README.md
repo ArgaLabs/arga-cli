@@ -7,6 +7,7 @@
 - Authenticates your machine with Arga using the device login flow.
 - Installs MCP configuration into supported local agents.
 - Starts URL validation runs from the terminal.
+- Starts pull request validation runs from the terminal.
 
 ## Installation
 
@@ -50,6 +51,12 @@ Start a browser validation run:
 arga test url --url https://demo-app.com --prompt "test the login flow"
 ```
 
+Start a pull request validation run:
+
+```bash
+arga validate pr --repo arga-labs/validation-server --pr 182
+```
+
 ## Supported MCP Targets
 
 `arga mcp install` writes or updates MCP configuration for supported agents when they are detected locally:
@@ -68,6 +75,7 @@ To point it at another environment, pass `--api-url` or set `ARGA_API_URL`:
 arga login --api-url http://localhost:8000
 arga mcp install --api-url http://localhost:8000
 arga test url --api-url http://localhost:8000 --url https://demo-app.com --prompt "test checkout"
+arga validate pr --api-url http://localhost:8000 --repo arga-labs/validation-server --pr 182
 ```
 
 ```bash

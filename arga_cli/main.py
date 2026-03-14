@@ -87,6 +87,19 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to start URL validation")
 
+    def start_pr_validation(
+        self,
+        *,
+        repo: str,
+        pr_number: int,
+    ) -> dict[str, str]:
+        response = self._client.post(
+            f"{self._api_url}/validation/pr",
+            json={"repo": repo, "pr_number": pr_number},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to start PR validation")
+
     def _auth_headers(self) -> dict[str, str]:
         if not self._api_key:
             raise NotAuthenticatedError("Error: Not authenticated. Run `arga login`.")
@@ -247,6 +260,23 @@ def run_test_url(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_validate_pr(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.start_pr_validation(repo=args.repo, pr_number=args.pr)
+    finally:
+        client.close()
+
+    print("Starting PR validation...\n")
+    print(f"Repository: {args.repo}")
+    print(f"PR: #{args.pr}\n")
+    print("Validation run started.")
+    print(f"Run ID: {payload.get('run_id', 'unknown')}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    return 0
+
+
 def run_mcp_install(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     installed, failures = install_mcp_configuration(
@@ -285,6 +315,26 @@ def build_parser() -> argparse.ArgumentParser:
     test_url_parser.add_argument("--email", help="Optional login email")
     test_url_parser.add_argument("--password", help="Optional login password")
     test_url_parser.set_defaults(func=run_test_url)
+
+    validate_parser = subparsers.add_parser("validate", help="Start PR or URL validation runs")
+    validate_subparsers = validate_parser.add_subparsers(dest="validate_command", required=True)
+
+    validate_pr_parser = validate_subparsers.add_parser("pr", help="Run PR validation")
+    validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
+    validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
+    validate_pr_parser.set_defaults(func=run_validate_pr)
+
+    validate_url_parser = validate_subparsers.add_parser(
+        "url",
+        help="Run a browser validation against a deployed URL",
+    )
+    validate_url_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    validate_url_parser.add_argument("--url", required=True, help="Deployed application URL")
+    validate_url_parser.add_argument("--prompt", required=True, help="Natural language instructions for the agent")
+    validate_url_parser.add_argument("--email", help="Optional login email")
+    validate_url_parser.add_argument("--password", help="Optional login password")
+    validate_url_parser.set_defaults(func=run_test_url)
 
     mcp_parser = subparsers.add_parser("mcp", help="Manage MCP integrations")
     mcp_subparsers = mcp_parser.add_subparsers(dest="mcp_command", required=True)
