@@ -11,7 +11,7 @@
 - Starts URL validation runs from the terminal.
 - Starts pull request validation runs from the terminal.
 
-## Installation
+## Installation 
 
 Once published to PyPI:
 
