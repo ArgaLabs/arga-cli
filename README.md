@@ -10,6 +10,8 @@
 - Installs MCP configuration into supported local agents.
 - Starts URL validation runs from the terminal.
 - Starts pull request validation runs from the terminal.
+- Wraps `git commit` and `git push` with Arga skip-validation helpers.
+- Starts and inspects Arga app scans.
 
 ## Installation 
 
@@ -65,6 +67,37 @@ Start a pull request validation run:
 arga validate pr --repo arga-labs/validation-server --pr 182
 ```
 
+Create a commit that skips Arga validation:
+
+```bash
+arga commit -m "docs: update examples" --skip
+arga push --skip
+```
+
+Inspect or update automatic validation settings:
+
+```bash
+arga validate install arga-labs/validation-server
+arga validate config arga-labs/validation-server
+arga validate config set arga-labs/validation-server --trigger branch --branch main --comments on
+```
+
+Start an app scan and inspect it later:
+
+```bash
+arga scan https://demo-app.com --budget 200
+arga scan status <run_id>
+arga scan report <run_id>
+```
+
+List and inspect recent validation runs:
+
+```bash
+arga runs list --repo arga-labs/validation-server --limit 20
+arga runs status <run_id>
+arga runs cancel <run_id>
+```
+
 `arga validate url` is also available and currently behaves the same as `arga test url`:
 
 ```bash
@@ -91,11 +124,17 @@ arga logout
 arga test url --url https://demo-app.com --prompt "test login flow"
 arga validate url --url https://demo-app.com --prompt "test checkout"
 arga validate pr --repo arga-labs/validation-server --pr 182
+arga validate install arga-labs/validation-server
+arga validate config arga-labs/validation-server
+arga validate config set arga-labs/validation-server --trigger branch --branch main --comments on
 ```
 
 - `arga test url` starts a one-off validation against a deployed URL.
 - `arga validate url` is an equivalent URL-validation entry point under the `validate` namespace.
 - `arga validate pr` starts GitHub-backed PR validation for a repository and pull request number.
+- `arga validate install <repo>` installs the GitHub webhook for automatic validation on a repository.
+- `arga validate config <repo>` shows the current automatic validation settings, including install state, trigger mode, selected branch, and PR comment behavior.
+- `arga validate config set <repo>` updates the automatic validation settings. Any omitted options keep their current value.
 
 For URL validation, you can optionally provide credentials:
 
@@ -108,6 +147,45 @@ arga test url \
 ```
 
 Both `--email` and `--password` must be supplied together.
+
+### App Scans
+
+```bash
+arga scan https://demo-app.com --budget 200
+arga scan status <run_id>
+arga scan report <run_id>
+```
+
+- `arga scan <url>` starts an app scan, waits for the generated scan plan to be ready, and auto-approves it so execution can begin.
+- `--budget` controls the red-team action budget and defaults to `200`.
+- `arga scan status <run_id>` prints the current run status and anomaly count.
+- `arga scan report <run_id>` prints the final JSON report once the scan has completed.
+
+### Validation Runs
+
+```bash
+arga runs list --repo arga-labs/validation-server --status running --limit 20
+arga runs status <run_id>
+arga runs cancel <run_id>
+```
+
+- `arga runs list` shows recent PR and branch validation runs in table form.
+- `--repo` narrows the list to a single repository.
+- `--status` accepts `completed`, `failed`, or `running`. The `running` filter includes non-terminal states such as `queued`.
+- `arga runs status <run_id>` prints a detailed summary for a specific run.
+- `arga runs cancel <run_id>` cancels the run through the validation API.
+
+### Git Wrappers
+
+```bash
+arga commit -m "docs: update examples" --skip
+arga push --skip
+```
+
+- `arga commit` delegates to `git commit`.
+- `arga commit --skip` appends a final `[skip arga]` paragraph to the commit message so Arga skips validation for that head commit.
+- `arga push` delegates to `git push`.
+- `arga push --skip` verifies the current `HEAD` commit already contains `[skip arga]` before pushing. This is safest when the commit was created with `arga commit --skip`.
 
 ## Supported MCP Targets
 
