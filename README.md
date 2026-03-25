@@ -267,6 +267,34 @@ To install the current checkout as a shell command:
 uv tool install -e .
 ```
 
+## Releasing
+
+This repo includes a GitHub Actions workflow at `.github/workflows/publish.yml` for trusted publishing.
+
+One-time setup:
+
+- Create GitHub Environments named `testpypi` and `pypi` in the repository settings.
+- In TestPyPI, add a Trusted Publisher for this GitHub repository and workflow:
+  - owner: `ArgaLabs`
+  - repository: `arga-cli`
+  - workflow: `publish.yml`
+  - environment: `testpypi`
+- In PyPI, add a Trusted Publisher with the same repository and workflow, but environment `pypi`.
+
+Publishing flow:
+
+- Manual TestPyPI publish: run the `Publish Package` workflow with `repository=testpypi`.
+- Automatic PyPI publish: push a tag like `v0.1.0`.
+- The workflow verifies that the tag version matches `project.version` in `pyproject.toml`, builds the package with `uv build`, and publishes with `uv publish`.
+
+Typical release steps:
+
+```bash
+uv run pytest
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## Config Storage
 
 The CLI stores its local auth state in:
