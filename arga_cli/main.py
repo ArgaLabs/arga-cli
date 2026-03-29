@@ -988,6 +988,28 @@ def run_push_cli(argv: list[str]) -> int:
     return _run_git_command(["push", *git_args])
 
 
+def run_wizard(args: argparse.Namespace) -> int:
+    """Launch the arga-wizard npm package, passing the stored API key."""
+    try:
+        api_key = load_api_key()
+    except (NotAuthenticatedError, CliError):
+        print("Not logged in. Run `arga login` first, or use `npx arga-wizard` directly.")
+        return 1
+
+    cmd: list[str] = ["npx", "arga-wizard"]
+    cmd.extend(["--api-key", api_key])
+    if args.api_url != DEFAULT_API_URL:
+        cmd.extend(["--api-url", args.api_url])
+
+    try:
+        result = subprocess.run(cmd, check=False)
+        return result.returncode
+    except FileNotFoundError:
+        print("Node.js is required for the wizard. Install it from https://nodejs.org")
+        print("Or run the wizard directly: npx arga-wizard")
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arga")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1068,6 +1090,10 @@ def build_parser() -> argparse.ArgumentParser:
     runs_cancel_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     runs_cancel_parser.add_argument("run_id", help="Validation run ID")
     runs_cancel_parser.set_defaults(func=run_runs_cancel)
+
+    wizard_parser = subparsers.add_parser("wizard", help="Launch the twins quickstart wizard")
+    wizard_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    wizard_parser.set_defaults(func=run_wizard)
 
     subparsers.add_parser("commit", help="Wrap git commit and optionally mark it to skip Arga validation")
     subparsers.add_parser("push", help="Wrap git push and verify skip state when requested")
