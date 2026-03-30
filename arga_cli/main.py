@@ -330,6 +330,32 @@ def run_whoami(args: argparse.Namespace) -> int:
 
     print(f"Logged in as: {payload.get('github_login', 'unknown')}")
     print(f"Workspace: {payload.get('workspace', 'Unknown')}")
+
+    billing_plan = payload.get("billing_plan", "free")
+    print(f"Plan: {billing_plan}")
+
+    plan_limits = payload.get("plan_limits")
+    if plan_limits:
+        runs_remaining = plan_limits.get("validation_runs_remaining")
+        runs_limit = plan_limits.get("validation_runs_limit")
+        if runs_limit is not None:
+            print(f"Validation runs: {runs_remaining}/{runs_limit} remaining this month")
+        else:
+            print("Validation runs: unlimited")
+
+        ci_limit = plan_limits.get("ci_checks_limit")
+        ci_remaining = plan_limits.get("ci_checks_remaining")
+        if ci_limit is not None:
+            print(f"CI checks: {ci_remaining}/{ci_limit} remaining this month")
+        elif billing_plan in ("team", "paid"):
+            print("CI checks: unlimited")
+
+        max_twins = plan_limits.get("max_twins_per_run")
+        if max_twins is not None:
+            print(f"Twins per run: {max_twins}")
+        elif billing_plan in ("team", "paid"):
+            print("Twins per run: unlimited")
+
     return 0
 
 
