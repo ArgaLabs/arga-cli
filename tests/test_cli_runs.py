@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from arga_cli import main
 
 
@@ -118,6 +120,96 @@ def test_runs_status_prints_detail_summary(monkeypatch, capsys) -> None:
     assert "Status: running" in output
     assert "Repository: arga-labs/validation-server" in output
     assert "PR/Branch: PR #182" in output
+
+
+def test_runs_list_json_flag(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    def fake_list(self, *, repo: str | None = None, limit: int = 20, offset: int = 0):
+        return {
+            "items": [
+                {
+                    "run_id": "run_1",
+                    "status": "completed",
+                    "repo": "arga-labs/validation-server",
+                    "pr_number": 182,
+                    "created_at": "2026-03-25T12:30:00Z",
+                },
+                {
+                    "run_id": "run_2",
+                    "status": "failed",
+                    "repo": "arga-labs/validation-server",
+                    "branch": "main",
+                    "created_at": "2026-03-25T12:00:00Z",
+                },
+            ],
+            "limit": limit,
+            "offset": offset,
+            "has_more": False,
+            "total": 2,
+        }
+
+    monkeypatch.setattr(main.ApiClient, "list_pr_validation_runs", fake_list)
+
+    args = main.build_parser().parse_args(["runs", "list", "--json"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    parsed = json.loads(output)
+    assert isinstance(parsed, list)
+    assert len(parsed) == 2
+    assert parsed[0]["run_id"] == "run_1"
+    assert parsed[1]["run_id"] == "run_2"
+
+
+def test_runs_list_json_flag_empty(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    def fake_list(self, *, repo: str | None = None, limit: int = 20, offset: int = 0):
+        return {"items": [], "limit": limit, "offset": offset, "has_more": False, "total": 0}
+
+    monkeypatch.setattr(main.ApiClient, "list_pr_validation_runs", fake_list)
+
+    args = main.build_parser().parse_args(["runs", "list", "--json"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert json.loads(output) == []
+
+
+def test_runs_status_json_flag(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    run_data = {
+        "id": "run_123",
+        "status": "running",
+        "run_type": "pr",
+        "mode": "auto_visual",
+        "repo_full_name": "arga-labs/validation-server",
+        "github_pr_number": 182,
+        "commit_sha": "abc123",
+        "created_at": "2026-03-25T12:30:00Z",
+        "environment_url": "https://preview.example.com",
+        "session_id": "session_1",
+    }
+
+    def fake_get_run(self, run_id: str):
+        return run_data
+
+    monkeypatch.setattr(main.ApiClient, "get_run", fake_get_run)
+
+    args = main.build_parser().parse_args(["runs", "status", "run_123", "--json"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    parsed = json.loads(output)
+    assert parsed == run_data
 
 
 def test_runs_cancel_prints_cancelled_status(monkeypatch, capsys) -> None:

@@ -375,6 +375,10 @@ def run_test_url(args: argparse.Namespace) -> int:
     finally:
         client.close()
 
+    if getattr(args, "json", False):
+        print(json.dumps({"run_id": payload.get("run_id"), "status": payload.get("status")}))
+        return 0
+
     print("Starting validation...\n")
     print(f"URL: {args.url}")
     print(f"Prompt: {args.prompt}\n")
@@ -390,6 +394,10 @@ def run_validate_pr(args: argparse.Namespace) -> int:
         payload = client.start_pr_validation(repo=args.repo, pr_number=args.pr)
     finally:
         client.close()
+
+    if args.json:
+        print(json.dumps({"run_id": payload.get("run_id"), "status": payload.get("status")}))
+        return 0
 
     print("Starting PR validation...\n")
     print(f"Repository: {args.repo}")
@@ -809,6 +817,10 @@ def run_runs_list(args: argparse.Namespace) -> int:
     finally:
         client.close()
 
+    if args.json:
+        print(json.dumps(runs))
+        return 0
+
     if not runs:
         print("No matching validation runs found.")
         return 0
@@ -824,6 +836,10 @@ def run_runs_status(args: argparse.Namespace) -> int:
         run = client.get_run(args.run_id)
     finally:
         client.close()
+
+    if args.json:
+        print(json.dumps(run))
+        return 0
 
     print(f"Run ID: {run.get('id', args.run_id)}")
     print(f"Status: {run.get('status', 'unknown')}")
@@ -1061,6 +1077,7 @@ def build_parser() -> argparse.ArgumentParser:
     test_url_parser.add_argument("--prompt", required=True, help="Natural language instructions for the agent")
     test_url_parser.add_argument("--email", help="Optional login email")
     test_url_parser.add_argument("--password", help="Optional login password")
+    test_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     test_url_parser.set_defaults(func=run_test_url)
 
     validate_parser = subparsers.add_parser("validate", help="Start PR or URL validation runs")
@@ -1070,6 +1087,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
+    validate_pr_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     validate_pr_parser.set_defaults(func=run_validate_pr)
 
     validate_url_parser = validate_subparsers.add_parser(
@@ -1081,6 +1099,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_url_parser.add_argument("--prompt", required=True, help="Natural language instructions for the agent")
     validate_url_parser.add_argument("--email", help="Optional login email")
     validate_url_parser.add_argument("--password", help="Optional login password")
+    validate_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     validate_url_parser.set_defaults(func=run_test_url)
 
     mcp_parser = subparsers.add_parser("mcp", help="Manage MCP integrations")
@@ -1105,11 +1124,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Filter by validation status",
     )
     runs_list_parser.add_argument("--limit", type=int, default=20, help="Maximum number of runs to show")
+    runs_list_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     runs_list_parser.set_defaults(func=run_runs_list)
 
     runs_status_parser = runs_subparsers.add_parser("status", help="Show detailed status for a validation run")
     runs_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     runs_status_parser.add_argument("run_id", help="Validation run ID")
+    runs_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     runs_status_parser.set_defaults(func=run_runs_status)
 
     runs_cancel_parser = runs_subparsers.add_parser("cancel", help="Cancel a validation run")
