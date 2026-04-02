@@ -212,6 +212,112 @@ def test_runs_status_json_flag(monkeypatch, capsys) -> None:
     assert parsed == run_data
 
 
+def test_runs_logs_prints_worker_and_runtime_logs(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    def fake_get_logs(self, run_id: str):
+        assert run_id == "run_123"
+        return {
+            "run": {
+                "id": run_id,
+                "status": "ready",
+                "run_type": "twin_quickstart",
+                "mode": "staging",
+                "repo_full_name": None,
+                "commit_sha": None,
+                "created_at": "2026-03-25T12:30:00Z",
+                "environment_url": "https://preview.example.com",
+                "event_log_json": [{"type": "environment_ready"}],
+            },
+            "worker_logs": [
+                {
+                    "job_id": "job_1",
+                    "job_type": "deploy",
+                    "target_role": "warm-vm",
+                    "status": "succeeded",
+                    "content": "deploy output",
+                    "truncated": False,
+                    "error": None,
+                }
+            ],
+            "runtime_logs": [
+                {
+                    "timestamp": "2026-03-25T12:31:00Z",
+                    "service_name": "arga-api",
+                    "severity": "INFO",
+                    "event": "environment_ready",
+                    "code": "ok",
+                    "request_id": "req_1",
+                    "job_id": "job_1",
+                    "surface_name": "app",
+                    "message": "Environment ready.",
+                }
+            ],
+            "warnings": ["Cloud Logging query was partially truncated."],
+        }
+
+    monkeypatch.setattr(main.ApiClient, "get_run_logs", fake_get_logs)
+
+    args = main.build_parser().parse_args(["runs", "logs", "run_123"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Run ID: run_123" in output
+    assert "Worker Logs:" in output
+    assert "deploy output" in output
+    assert "Runtime Logs:" in output
+    assert "Environment ready." in output
+    assert "Warnings:" in output
+
+
+def test_runs_logs_prints_json(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    payload = {
+        "run": {"id": "run_123", "status": "ready"},
+        "worker_logs": [],
+        "runtime_logs": [],
+        "warnings": [],
+    }
+
+    monkeypatch.setattr(main.ApiClient, "get_run_logs", lambda self, run_id: payload)
+
+    args = main.build_parser().parse_args(["runs", "logs", "run_123", "--json"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert json.loads(output) == payload
+
+
+def test_runs_logs_uses_wizard_session_file_when_run_id_missing(monkeypatch, capsys, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / main.WIZARD_SESSION_FILE).write_text(json.dumps({"run_id": "run_from_session"}) + "\n")
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    def fake_get_logs(self, run_id: str):
+        assert run_id == "run_from_session"
+        return {
+            "run": {"id": run_id, "status": "ready"},
+            "worker_logs": [],
+            "runtime_logs": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(main.ApiClient, "get_run_logs", fake_get_logs)
+
+    args = main.build_parser().parse_args(["runs", "logs"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Run ID: run_from_session" in output
+
+
 def test_runs_cancel_prints_cancelled_status(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)

@@ -95,6 +95,7 @@ List and inspect recent validation runs:
 ```bash
 arga runs list --repo arga-labs/validation-server --limit 20
 arga runs status <run_id>
+arga runs logs <run_id>
 arga runs cancel <run_id>
 ```
 
@@ -166,6 +167,7 @@ arga scan report <run_id>
 ```bash
 arga runs list --repo arga-labs/validation-server --status running --limit 20
 arga runs status <run_id>
+arga runs logs <run_id>
 arga runs cancel <run_id>
 ```
 
@@ -173,6 +175,9 @@ arga runs cancel <run_id>
 - `--repo` narrows the list to a single repository.
 - `--status` accepts `completed`, `failed`, or `running`. The `running` filter includes non-terminal states such as `queued`.
 - `arga runs status <run_id>` prints a detailed summary for a specific run.
+- `arga runs logs <run_id>` prints worker logs plus recent runtime logs for a run you own.
+- When you omit `<run_id>`, `arga runs logs` falls back to `./.arga-session.json` when present, which makes wizard-created twin sessions easy to inspect from the same directory.
+- Add `--json` to `arga runs logs` for a machine-readable response.
 - `arga runs cancel <run_id>` cancels the run through the validation API.
 
 ### Git Wrappers
