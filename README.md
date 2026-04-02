@@ -67,6 +67,14 @@ Start a pull request validation run:
 arga validate pr --repo arga-labs/validation-server --pr 182
 ```
 
+Any of these commands accept `--json` for machine-parseable output:
+
+```bash
+arga test url --url https://demo-app.com --prompt "test login" --json
+arga runs list --json
+arga runs status <run_id> --json
+```
+
 Create a commit that skips Arga validation:
 
 ```bash
@@ -132,6 +140,8 @@ arga validate config set arga-labs/validation-server --trigger branch --branch m
 - `arga test url` starts a one-off validation against a deployed URL.
 - `arga validate url` is an equivalent URL-validation entry point under the `validate` namespace.
 - `arga validate pr` starts GitHub-backed PR validation for a repository and pull request number.
+
+All three accept `--json` to output `{"run_id": "...", "status": "..."}` instead of human-readable text.
 - `arga validate install <repo>` installs the GitHub webhook for automatic validation on a repository.
 - `arga validate config <repo>` shows the current automatic validation settings, including install state, trigger mode, selected branch, and PR comment behavior.
 - `arga validate config set <repo>` updates the automatic validation settings. Any omitted options keep their current value.
@@ -174,6 +184,8 @@ arga runs cancel <run_id>
 - `--status` accepts `completed`, `failed`, or `running`. The `running` filter includes non-terminal states such as `queued`.
 - `arga runs status <run_id>` prints a detailed summary for a specific run.
 - `arga runs cancel <run_id>` cancels the run through the validation API.
+
+Both `runs list` and `runs status` accept `--json` for structured output.
 
 ### Git Wrappers
 
@@ -233,6 +245,43 @@ If you need to add the server manually, the generated config looks like:
   }
 }
 ```
+
+## JSON Output
+
+Key commands support `--json` for use in CI pipelines, shell scripts, and agent automation:
+
+```bash
+# Capture the run ID from a validation
+RUN_ID=$(arga test url --url https://app.example.com --prompt "test login" --json | jq -r .run_id)
+
+# Poll run status as JSON
+arga runs status "$RUN_ID" --json | jq .status
+
+# List runs as a JSON array
+arga runs list --repo arga-labs/validation-server --json | jq '.[].run_id'
+
+# Start PR validation and capture result
+arga validate pr --repo arga-labs/validation-server --pr 182 --json
+```
+
+Commands that support `--json`:
+
+| Command | JSON shape |
+|---|---|
+| `arga test url` | `{"run_id": "...", "status": "..."}` |
+| `arga validate pr` | `{"run_id": "...", "status": "..."}` |
+| `arga validate url` | `{"run_id": "...", "status": "..."}` |
+| `arga runs status <id>` | Full run object |
+| `arga runs list` | Array of run summaries |
+
+## Example Project
+
+See [ArgaLabs/example-app](https://github.com/ArgaLabs/example-app) for a complete working example showing how to integrate Arga into a Next.js project with:
+
+- GitHub Actions CI validation on every PR
+- MCP config for Cursor and Claude Code
+- A shell script for manual validation
+- End-to-end walkthrough in the README
 
 ## Using A Custom API URL
 
