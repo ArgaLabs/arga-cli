@@ -10,6 +10,7 @@ import tempfile
 import time
 import webbrowser
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -25,6 +26,13 @@ WIZARD_SESSION_PATH = Path(WIZARD_SESSION_FILE)
 POLL_INTERVAL_SECONDS = 2.0
 POLL_TIMEOUT_SECONDS = 600.0
 SKIP_TRAILER = "[skip arga]"
+
+
+def _cli_version() -> str:
+    try:
+        return version("arga-cli")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 class CliError(Exception):
@@ -1240,6 +1248,11 @@ def run_wizard(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arga")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_cli_version()}",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     login_parser = subparsers.add_parser("login", help="Authenticate the CLI")
