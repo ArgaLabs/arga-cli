@@ -75,6 +75,7 @@ class ApiClient:
         prompt: str,
         email: str | None = None,
         password: str | None = None,
+        ttl_minutes: int | None = None,
     ) -> dict[str, str]:
         payload: dict[str, object] = {
             "url": url,
@@ -85,6 +86,8 @@ class ApiClient:
                 "email": email or "",
                 "password": password or "",
             }
+        if ttl_minutes is not None:
+            payload["ttl_minutes"] = ttl_minutes
         response = self._client.post(
             f"{self._api_url}/validate/url",
             json=payload,
@@ -356,7 +359,32 @@ def run_whoami(args: argparse.Namespace) -> int:
         elif billing_plan in ("team", "paid"):
             print("Twins per run: unlimited")
 
+        max_ttl = plan_limits.get("max_ttl_minutes")
+        if max_ttl is not None:
+            print(f"Max run TTL: {max_ttl} minutes")
+        elif billing_plan in ("team", "paid"):
+            print("Max run TTL: 480 minutes")
+
     return 0
+
+
+def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
+    """Resolve TTL based on user plan. Free users are capped at 10 minutes."""
+    FREE_TTL = 10
+
+    me = client.get_me()
+    billing_plan = me.get("billing_plan", "free")
+
+    if billing_plan in ("team", "paid"):
+        return requested_ttl  # None means server default (60 min)
+
+    # Free tier — locked to 10 minutes
+    if requested_ttl is not None and requested_ttl != FREE_TTL:
+        raise CliError(
+            f"Free plan runs are limited to {FREE_TTL} minutes. "
+            f"Upgrade to Team for custom TTL (up to 480 minutes)."
+        )
+    return FREE_TTL
 
 
 def run_test_url(args: argparse.Namespace) -> int:
@@ -366,11 +394,13 @@ def run_test_url(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
+        ttl_minutes = _resolve_ttl(client, getattr(args, "ttl", None))
         payload = client.start_url_validation(
             url=args.url,
             prompt=args.prompt,
             email=args.email,
             password=args.password,
+            ttl_minutes=ttl_minutes,
         )
     finally:
         client.close()
@@ -381,7 +411,8 @@ def run_test_url(args: argparse.Namespace) -> int:
 
     print("Starting validation...\n")
     print(f"URL: {args.url}")
-    print(f"Prompt: {args.prompt}\n")
+    print(f"Prompt: {args.prompt}")
+    print(f"TTL: {ttl_minutes} minutes\n")
     print(f"Run ID: {payload.get('run_id', 'unknown')}")
     print(f"Status: {payload.get('status', 'unknown')}")
     return 0
@@ -411,11 +442,33 @@ def run_validate_pr(args: argparse.Namespace) -> int:
 def _validate_help_text() -> str:
     return (
         "usage: arga validate pr --repo <owner/repo> --pr <number>\n"
+        "       arga validate url --url <url> --prompt <prompt> [--ttl <minutes>]\n"
         "       arga validate install <repo>\n"
         "       arga validate config <repo>\n"
         "       arga validate config set <repo> [--trigger pr|branch] [--branch <name>] [--comments on|off]\n\n"
         "Start validations or manage automatic validation settings."
     )
+
+
+def _build_validate_url_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arga validate url",
+        description="Run a browser validation against a deployed URL.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("--url", required=True, help="Deployed application URL")
+    parser.add_argument("--prompt", required=True, help="Natural language instructions for the agent")
+    parser.add_argument("--email", help="Optional login email")
+    parser.add_argument("--password", help="Optional login password")
+    parser.add_argument(
+        "--ttl",
+        type=int,
+        default=None,
+        help="Run duration in minutes (Team/Paid: 1-480, default 60; Free: fixed at 10)",
+    )
+    parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    return parser
 
 
 def _build_validate_pr_parser() -> argparse.ArgumentParser:
@@ -859,6 +912,8 @@ def run_validate_cli(argv: list[str]) -> int:
 
     if argv[0] == "pr":
         return run_validate_pr(_build_validate_pr_parser().parse_args(argv[1:]))
+    if argv[0] == "url":
+        return run_test_url(_build_validate_url_parser().parse_args(argv[1:]))
     if argv[0] == "install":
         return run_validate_install(_build_validate_install_parser().parse_args(argv[1:]))
     if argv[0] == "config":
@@ -1060,6 +1115,12 @@ def build_parser() -> argparse.ArgumentParser:
     test_url_parser.add_argument("--prompt", required=True, help="Natural language instructions for the agent")
     test_url_parser.add_argument("--email", help="Optional login email")
     test_url_parser.add_argument("--password", help="Optional login password")
+    test_url_parser.add_argument(
+        "--ttl",
+        type=int,
+        default=None,
+        help="Run duration in minutes (Team/Paid: 1-480, default 60; Free: fixed at 10)",
+    )
     test_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     test_url_parser.set_defaults(func=run_test_url)
 
