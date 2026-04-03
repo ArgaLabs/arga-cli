@@ -178,6 +178,7 @@ arga runs cancel <run_id>
 - `arga runs logs <run_id>` prints worker logs plus recent runtime logs for a run you own.
 - When you omit `<run_id>`, `arga runs logs` falls back to `./.arga-session.json` when present, which makes wizard-created twin sessions easy to inspect from the same directory.
 - Add `--json` to `arga runs logs` for a machine-readable response.
+- Add `--errors-only` to keep only failed worker logs plus warning/error runtime entries.
 - `arga runs cancel <run_id>` cancels the run through the validation API.
 
 ### Git Wrappers

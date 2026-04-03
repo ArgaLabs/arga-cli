@@ -293,6 +293,117 @@ def test_runs_logs_prints_json(monkeypatch, capsys) -> None:
     assert json.loads(output) == payload
 
 
+def test_runs_logs_errors_only_filters_plain_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    def fake_get_logs(self, run_id: str):
+        assert run_id == "run_123"
+        return {
+            "run": {
+                "id": run_id,
+                "status": "ready",
+                "run_type": "twin_quickstart",
+                "mode": "staging",
+                "repo_full_name": None,
+                "commit_sha": None,
+                "created_at": "2026-03-25T12:30:00Z",
+                "environment_url": "https://preview.example.com",
+                "event_log_json": [],
+            },
+            "worker_logs": [
+                {
+                    "job_id": "job_ok",
+                    "job_type": "build",
+                    "target_role": "builder",
+                    "status": "succeeded",
+                    "content": "all good",
+                    "truncated": False,
+                    "error": None,
+                },
+                {
+                    "job_id": "job_bad",
+                    "job_type": "deploy",
+                    "target_role": "warm-vm",
+                    "status": "failed",
+                    "content": "deploy failed output",
+                    "truncated": False,
+                    "error": None,
+                },
+            ],
+            "runtime_logs": [
+                {
+                    "timestamp": "2026-03-25T12:31:00Z",
+                    "service_name": "arga-api",
+                    "severity": "INFO",
+                    "event": "environment_ready",
+                    "code": None,
+                    "request_id": "req_ok",
+                    "job_id": None,
+                    "surface_name": None,
+                    "message": "Environment ready.",
+                },
+                {
+                    "timestamp": "2026-03-25T12:32:00Z",
+                    "service_name": "preview-proxy",
+                    "severity": "WARNING",
+                    "event": "preview.request.finish",
+                    "code": None,
+                    "request_id": "req_warn",
+                    "job_id": None,
+                    "surface_name": "slack",
+                    "message": "Preview request completed.",
+                },
+            ],
+            "warnings": ["Cloud Logging query was partially truncated."],
+        }
+
+    monkeypatch.setattr(main.ApiClient, "get_run_logs", fake_get_logs)
+
+    args = main.build_parser().parse_args(["runs", "logs", "run_123", "--errors-only"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "job_bad" in output
+    assert "deploy failed output" in output
+    assert "job_ok" not in output
+    assert "all good" not in output
+    assert "Preview request completed." in output
+    assert "Environment ready." not in output
+    assert "Warnings:" in output
+
+
+def test_runs_logs_errors_only_filters_json(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    payload = {
+        "run": {"id": "run_123", "status": "ready"},
+        "worker_logs": [
+            {"job_id": "job_ok", "status": "succeeded", "error": None},
+            {"job_id": "job_bad", "status": "failed", "error": None},
+        ],
+        "runtime_logs": [
+            {"severity": "INFO", "message": "Environment ready."},
+            {"severity": "WARNING", "message": "Preview request completed."},
+        ],
+        "warnings": ["Cloud Logging query was partially truncated."],
+    }
+
+    monkeypatch.setattr(main.ApiClient, "get_run_logs", lambda self, run_id: payload)
+
+    args = main.build_parser().parse_args(["runs", "logs", "run_123", "--json", "--errors-only"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    parsed = json.loads(output)
+    assert parsed["worker_logs"] == [{"job_id": "job_bad", "status": "failed", "error": None}]
+    assert parsed["runtime_logs"] == [{"severity": "WARNING", "message": "Preview request completed."}]
+    assert parsed["warnings"] == ["Cloud Logging query was partially truncated."]
+
+
 def test_runs_logs_uses_wizard_session_file_when_run_id_missing(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / main.WIZARD_SESSION_FILE).write_text(json.dumps({"run_id": "run_from_session"}) + "\n")

@@ -905,6 +905,40 @@ def _print_runtime_logs(runtime_logs: list[dict[str, Any]]) -> None:
             print()
 
 
+def _is_error_runtime_log(runtime_log: dict[str, Any]) -> bool:
+    severity = str(runtime_log.get("severity") or "").strip().upper()
+    return severity in {"WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"}
+
+
+def _is_error_worker_log(worker_log: dict[str, Any]) -> bool:
+    status = str(worker_log.get("status") or "").strip().lower()
+    error = str(worker_log.get("error") or "").strip()
+    return status in {"failed", "error", "cancelled"} or bool(error)
+
+
+def _filter_run_logs_payload(payload: dict[str, Any], *, errors_only: bool) -> dict[str, Any]:
+    if not errors_only:
+        return payload
+
+    filtered_payload = dict(payload)
+    worker_logs = payload.get("worker_logs")
+    runtime_logs = payload.get("runtime_logs")
+    warnings = payload.get("warnings")
+
+    filtered_payload["worker_logs"] = (
+        [item for item in worker_logs if isinstance(item, dict) and _is_error_worker_log(item)]
+        if isinstance(worker_logs, list)
+        else []
+    )
+    filtered_payload["runtime_logs"] = (
+        [item for item in runtime_logs if isinstance(item, dict) and _is_error_runtime_log(item)]
+        if isinstance(runtime_logs, list)
+        else []
+    )
+    filtered_payload["warnings"] = warnings if isinstance(warnings, list) else []
+    return filtered_payload
+
+
 def _print_run_logs(payload: dict[str, Any], fallback_run_id: str) -> None:
     run = payload.get("run")
     run_data = run if isinstance(run, dict) else {}
@@ -995,6 +1029,8 @@ def run_runs_logs(args: argparse.Namespace) -> int:
         payload = client.get_run_logs(run_id)
     finally:
         client.close()
+
+    payload = _filter_run_logs_payload(payload, errors_only=args.errors_only)
 
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -1291,6 +1327,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Validation run ID. Defaults to {WIZARD_SESSION_FILE} in the current directory when available.",
     )
     runs_logs_parser.add_argument("--json", action="store_true", help="Print the raw JSON response")
+    runs_logs_parser.add_argument(
+        "--errors-only",
+        action="store_true",
+        help="Show only failed worker logs and warning/error runtime logs",
+    )
     runs_logs_parser.set_defaults(func=run_runs_logs)
 
     runs_cancel_parser = runs_subparsers.add_parser("cancel", help="Cancel a validation run")
