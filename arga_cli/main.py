@@ -575,11 +575,7 @@ def run_validate_config_set(args: argparse.Namespace) -> int:
     try:
         current = client.get_github_validation_config(repo=args.repo)
         trigger_mode = args.trigger or str(current.get("trigger_mode") or "pr")
-        comment_on_pr = (
-            current.get("comment_on_pr", True)
-            if args.comments is None
-            else args.comments == "on"
-        )
+        comment_on_pr = current.get("comment_on_pr", True) if args.comments is None else args.comments == "on"
         branch: str | None = None
         if trigger_mode == "branch":
             branch = args.branch or str(current.get("branch") or current.get("default_branch") or "").strip() or None
@@ -677,16 +673,12 @@ def _wait_for_scan_approval(client: ApiClient, run_id: str) -> dict[str, Any]:
 
         time.sleep(POLL_INTERVAL_SECONDS)
 
-    raise CliError(
-        f"Timed out waiting for the scan plan to be ready for run {last_run.get('id', run_id)}."
-    )
+    raise CliError(f"Timed out waiting for the scan plan to be ready for run {last_run.get('id', run_id)}.")
 
 
 def _print_scan_summary(run_id: str, run: dict[str, Any]) -> None:
     report = run.get("redteam_report_json")
-    anomaly_count = (
-        len(report.get("anomalies") or []) if isinstance(report, dict) else 0
-    )
+    anomaly_count = len(report.get("anomalies") or []) if isinstance(report, dict) else 0
     print(f"Run ID: {run_id}")
     print(f"Status: {_status_from_run(run)}")
     print(f"URL: {run.get('frontend_url') or run.get('pr_url') or 'unknown'}")
@@ -833,8 +825,7 @@ def _print_runs_table(runs: list[dict[str, Any]]) -> None:
         for run in runs
     ]
     widths = [
-        max(len(headers[index]), max((len(row[index]) for row in rows), default=0))
-        for index in range(len(headers))
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
     ]
 
     def format_row(values: list[str]) -> str:
@@ -1152,9 +1143,7 @@ def _build_skip_commit_args(git_args: list[str]) -> tuple[list[str], str | None,
 
     file_path = _extract_commit_file_path(git_args)
     if file_path is None:
-        raise CliError(
-            "Error: `arga commit --skip` requires a commit message via `-m/--message` or `-F/--file`."
-        )
+        raise CliError("Error: `arga commit --skip` requires a commit message via `-m/--message` or `-F/--file`.")
 
     if file_path == "-":
         stdin_message = sys.stdin.read()
@@ -1224,26 +1213,215 @@ def run_push_cli(argv: list[str]) -> int:
     return _run_git_command(["push", *git_args])
 
 
-def run_wizard(args: argparse.Namespace) -> int:
-    """Launch the arga-wizard npm package, passing the stored API key."""
+def _wizard_help_text() -> str:
+    return (
+        "usage: arga wizard [command] [options]\n\n"
+        "Commands:\n"
+        "  init        Run the quickstart wizard (default)\n"
+        "  status      Check twin session health\n"
+        "  reset       Reset all twins to seed state\n"
+        "  extend      Extend session by 10 minutes\n"
+        "  teardown    Destroy session and clean up\n"
+        "  env         Re-run .env rewriting step\n\n"
+        "Options:\n"
+        "  --api-url            API base URL\n"
+        "  --no-shape-detect    Disable heuristic detection of API keys by value pattern\n"
+        "  -h, --help           Show this help"
+    )
+
+
+def _build_wizard_init_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="arga wizard", allow_abbrev=False)
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("--no-shape-detect", action="store_true", default=False)
+    return parser
+
+
+def _build_wizard_session_parser(prog: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog, allow_abbrev=False)
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    return parser
+
+
+def run_wizard_init(args: argparse.Namespace) -> int:
+    """Run the full quickstart wizard natively."""
+    from arga_cli.wizard import run_wizard
+
     try:
         api_key = load_api_key()
     except (NotAuthenticatedError, CliError):
-        print("Not logged in. Run `arga login` first, or use `npx arga-wizard` directly.")
-        return 1
+        api_key = None
 
-    cmd: list[str] = ["npx", "arga-wizard"]
-    cmd.extend(["--api-key", api_key])
-    if args.api_url != DEFAULT_API_URL:
-        cmd.extend(["--api-url", args.api_url])
+    return run_wizard(
+        api_url=args.api_url,
+        api_key=api_key,
+        cwd=os.getcwd(),
+        shape_detect=not getattr(args, "no_shape_detect", False),
+    )
 
+
+def run_wizard_status(_args: argparse.Namespace) -> int:
+    from arga_cli.wizard.constants import TWIN_CATALOG
+    from arga_cli.wizard.output import print_summary_box
+    from arga_cli.wizard.provision import with_proxy_token
+    from arga_cli.wizard.session import load_session
+
+    session = load_session(os.getcwd())
+    client = ApiClient(session["api_url"], api_key=session["api_key"])
     try:
-        result = subprocess.run(cmd, check=False)
-        return result.returncode
-    except FileNotFoundError:
-        print("Node.js is required for the wizard. Install it from https://nodejs.org")
-        print("Or run the wizard directly: npx arga-wizard")
+        response = client._client.get(
+            f"{client._api_url}/validate/twins/provision/{session['run_id']}/status",
+            headers=client._auth_headers(),
+        )
+        status = client._parse_json(response, "Failed to get status")
+    finally:
+        client.close()
+
+    lines = [
+        "[bold]Twin Session Status[/bold]",
+        "",
+        f"Run ID:  {status['run_id']}",
+        f"Status:  {'[green]' + status['status'] + '[/green]' if status['status'] == 'ready' else '[yellow]' + status['status'] + '[/yellow]'}",
+        "",
+    ]
+    for name, info in status.get("twins", {}).items():
+        label = TWIN_CATALOG.get(name, {}).get("label", name).ljust(16)
+        url = with_proxy_token(info.get("base_url", ""), status.get("proxy_token"))
+        lines.append(f"{label} [underline]{url}[/underline]")
+    if status.get("expires_at"):
+        lines.append("")
+        lines.append(f"Expires: {status['expires_at']}")
+    print_summary_box(lines)
+    return 0
+
+
+def run_wizard_reset(_args: argparse.Namespace) -> int:
+    from arga_cli.wizard.constants import TWIN_CATALOG
+    from arga_cli.wizard.output import console, green, header
+    from arga_cli.wizard.provision import with_proxy_token
+    from arga_cli.wizard.session import load_session
+
+    session = load_session(os.getcwd())
+    client = ApiClient(session["api_url"], api_key=session["api_key"])
+    header("Resetting all twins...")
+
+    twins = session.get("twins", {})
+    proxy_token = session.get("proxy_token")
+
+    # Refresh from API if possible
+    try:
+        response = client._client.get(
+            f"{client._api_url}/validate/twins/provision/{session['run_id']}/status",
+            headers=client._auth_headers(),
+        )
+        status = client._parse_json(response, "Failed to get status")
+        if status.get("status") == "ready":
+            twins = {
+                name: {"base_url": info.get("base_url", ""), "admin_url": info.get("admin_url", "")}
+                for name, info in status.get("twins", {}).items()
+            }
+            proxy_token = status.get("proxy_token", proxy_token)
+    except Exception:
+        pass
+
+    for name, twin in twins.items():
+        label = TWIN_CATALOG.get(name, {}).get("label", name)
+        try:
+            reset_url = with_proxy_token(f"{twin['admin_url']}/admin/reset", proxy_token)
+            client._client.post(reset_url, json={}, headers={"Content-Type": "application/json"})
+            console.print(f"  {label}: [green]reset[/green]")
+        except Exception as exc:
+            console.print(f"  {label}: [red]failed \u2014 {exc}[/red]")
+
+    client.close()
+    green("\nDone.")
+    return 0
+
+
+def run_wizard_extend(_args: argparse.Namespace) -> int:
+    from arga_cli.wizard.output import error, green
+    from arga_cli.wizard.session import load_session
+
+    session = load_session(os.getcwd())
+    client = ApiClient(session["api_url"], api_key=session["api_key"])
+    try:
+        response = client._client.post(
+            f"{client._api_url}/validate/twins/provision/{session['run_id']}/extend",
+            json={"ttl_minutes": 10},
+            headers=client._auth_headers(),
+        )
+        client._parse_json(response, "Failed to extend session")
+        green("\nSession extended by 10 minutes.")
+    except Exception as exc:
+        error(f"Failed to extend: {exc}")
         return 1
+    finally:
+        client.close()
+    return 0
+
+
+def run_wizard_teardown(_args: argparse.Namespace) -> int:
+    from arga_cli.wizard.output import error, green
+    from arga_cli.wizard.session import delete_session, load_session
+
+    session = load_session(os.getcwd())
+    client = ApiClient(session["api_url"], api_key=session["api_key"])
+    try:
+        response = client._client.post(
+            f"{client._api_url}/validate/{session['run_id']}/cancel",
+            headers=client._auth_headers(),
+        )
+        client._parse_json(response, "Failed to cancel run")
+        delete_session(os.getcwd())
+        green("\nSession destroyed. .arga-session.json removed.")
+    except Exception as exc:
+        error(f"Failed to teardown: {exc}")
+        return 1
+    finally:
+        client.close()
+    return 0
+
+
+def run_wizard_env(args: argparse.Namespace) -> int:
+    from arga_cli.wizard.env import rewrite_env_files
+    from arga_cli.wizard.prompts import select_twins
+
+    selected = select_twins()
+    if not selected:
+        return 1
+    rewrite_env_files(
+        os.getcwd(),
+        selected,
+        shape_detect=not getattr(args, "no_shape_detect", False),
+    )
+    return 0
+
+
+def run_wizard_cli(argv: list[str]) -> int:
+    if not argv or argv[0] in {"-h", "--help"}:
+        print(_wizard_help_text())
+        return 0
+
+    command = argv[0]
+
+    if command == "init":
+        return run_wizard_init(_build_wizard_init_parser().parse_args(argv[1:]))
+    if command == "status":
+        return run_wizard_status(_build_wizard_session_parser("arga wizard status").parse_args(argv[1:]))
+    if command == "reset":
+        return run_wizard_reset(_build_wizard_session_parser("arga wizard reset").parse_args(argv[1:]))
+    if command == "extend":
+        return run_wizard_extend(_build_wizard_session_parser("arga wizard extend").parse_args(argv[1:]))
+    if command == "teardown":
+        return run_wizard_teardown(_build_wizard_session_parser("arga wizard teardown").parse_args(argv[1:]))
+    if command == "env":
+        return run_wizard_env(_build_wizard_init_parser().parse_args(argv[1:]))
+
+    # No recognized subcommand — treat everything as flags for `init`
+    if command.startswith("-"):
+        return run_wizard_init(_build_wizard_init_parser().parse_args(argv))
+
+    raise CliError(f"Unknown wizard subcommand: {command}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1352,9 +1530,7 @@ def build_parser() -> argparse.ArgumentParser:
     runs_cancel_parser.add_argument("run_id", help="Validation run ID")
     runs_cancel_parser.set_defaults(func=run_runs_cancel)
 
-    wizard_parser = subparsers.add_parser("wizard", help="Launch the twins quickstart wizard")
-    wizard_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    wizard_parser.set_defaults(func=run_wizard)
+    subparsers.add_parser("wizard", help="Twins quickstart wizard (run `arga wizard --help` for subcommands)")
 
     subparsers.add_parser("commit", help="Wrap git commit and optionally mark it to skip Arga validation")
     subparsers.add_parser("push", help="Wrap git push and verify skip state when requested")
@@ -1372,6 +1548,8 @@ def main() -> None:
             exit_code = run_validate_cli(sys.argv[2:])
         elif len(sys.argv) > 1 and sys.argv[1] == "scan":
             exit_code = run_scan_cli(sys.argv[2:])
+        elif len(sys.argv) > 1 and sys.argv[1] == "wizard":
+            exit_code = run_wizard_cli(sys.argv[2:])
         else:
             parser = build_parser()
             args = parser.parse_args()

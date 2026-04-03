@@ -16,9 +16,7 @@ def test_validate_pr_command_prints_run_id(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main.ApiClient, "start_pr_validation", fake_start)
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
 
-    args = main.build_parser().parse_args(
-        ["validate", "pr", "--repo", "arga-labs/validation-server", "--pr", "182"]
-    )
+    args = main.build_parser().parse_args(["validate", "pr", "--repo", "arga-labs/validation-server", "--pr", "182"])
     exit_code = args.func(args)
     output = capsys.readouterr().out
 
