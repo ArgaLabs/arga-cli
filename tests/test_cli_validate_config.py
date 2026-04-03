@@ -127,3 +127,17 @@ def test_main_dispatches_validate_wrapper_before_argparse(monkeypatch) -> None:
         raise AssertionError("Expected main() to exit")
 
     assert captured["argv"] == ["config", "arga-labs/validation-server"]
+
+
+def test_main_supports_global_version_flag(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "_cli_version", lambda: "0.1.3")
+    monkeypatch.setattr(sys, "argv", ["arga", "--version"])
+
+    try:
+        main.main()
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("Expected main() to exit")
+
+    assert capsys.readouterr().out.strip() == "arga 0.1.3"

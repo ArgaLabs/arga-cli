@@ -10,6 +10,7 @@ import tempfile
 import time
 import webbrowser
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -20,9 +21,18 @@ from arga_cli.mcp import install_mcp_configuration
 
 DEFAULT_API_URL = os.environ.get("ARGA_API_URL", "https://api.argalabs.com")
 CONFIG_PATH = Path.home() / ".config" / "arga" / "config.json"
+WIZARD_SESSION_FILE = ".arga-session.json"
+WIZARD_SESSION_PATH = Path(WIZARD_SESSION_FILE)
 POLL_INTERVAL_SECONDS = 2.0
 POLL_TIMEOUT_SECONDS = 600.0
 SKIP_TRAILER = "[skip arga]"
+
+
+def _cli_version() -> str:
+    try:
+        return version("arga-cli")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 class CliError(Exception):
@@ -127,6 +137,13 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to load run details")
+
+    def get_run_logs(self, run_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/runs/{run_id}/logs",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load run logs")
 
     def get_redteam_report(self, run_id: str) -> dict[str, Any]:
         response = self._client.get(
@@ -249,6 +266,31 @@ def delete_api_key() -> bool:
         return False
     CONFIG_PATH.unlink()
     return True
+
+
+def load_wizard_session(path: Path = WIZARD_SESSION_PATH) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError as exc:
+        raise CliError(f"Invalid wizard session file: {path}") from exc
+
+    if not isinstance(data, dict):
+        raise CliError(f"Invalid wizard session file: {path}")
+    return data
+
+
+def resolve_logs_run_id(run_id: str | None, *, session_path: Path = WIZARD_SESSION_PATH) -> str:
+    if run_id:
+        return run_id
+    session = load_wizard_session(session_path)
+    session_run_id = str((session or {}).get("run_id") or "").strip()
+    if session_run_id:
+        return session_run_id
+    raise CliError(
+        f"Run ID is required. Pass one explicitly or run this command from a directory containing {WIZARD_SESSION_FILE}."
+    )
 
 
 def build_verification_url(start_payload: dict[str, str]) -> str:
@@ -795,6 +837,139 @@ def _print_runs_table(runs: list[dict[str, Any]]) -> None:
         print(format_row(row))
 
 
+def _print_worker_logs(worker_logs: list[dict[str, Any]]) -> None:
+    print("Worker Logs:")
+    if not worker_logs:
+        print("None")
+        return
+
+    for index, worker_log in enumerate(worker_logs):
+        job_id = str(worker_log.get("job_id") or "-")
+        metadata = [
+            str(worker_log.get("job_type") or "").strip(),
+            str(worker_log.get("target_role") or "").strip(),
+            str(worker_log.get("status") or "").strip(),
+        ]
+        metadata_label = " / ".join(value for value in metadata if value)
+        print(f"{job_id}: {metadata_label or 'worker log'}")
+
+        error = str(worker_log.get("error") or "").strip()
+        content = str(worker_log.get("content") or "").rstrip()
+        if error:
+            print(f"Error: {error}")
+        elif content:
+            print(content)
+        else:
+            print("No log content available.")
+
+        if index < len(worker_logs) - 1:
+            print()
+
+
+def _print_runtime_logs(runtime_logs: list[dict[str, Any]]) -> None:
+    print("Runtime Logs:")
+    if not runtime_logs:
+        print("None")
+        return
+
+    for index, runtime_log in enumerate(runtime_logs):
+        header_parts = [
+            _format_timestamp(runtime_log.get("timestamp")),
+            str(runtime_log.get("severity") or "").strip(),
+            str(runtime_log.get("service_name") or "").strip(),
+            str(runtime_log.get("event") or "").strip(),
+            str(runtime_log.get("code") or "").strip(),
+        ]
+        header = " | ".join(part for part in header_parts if part and part != "-")
+        print(header or "Log entry")
+
+        message = str(runtime_log.get("message") or "").strip()
+        if message:
+            print(message)
+
+        metadata: list[str] = []
+        request_id = str(runtime_log.get("request_id") or "").strip()
+        if request_id:
+            metadata.append(f"request_id={request_id}")
+        job_id = str(runtime_log.get("job_id") or "").strip()
+        if job_id:
+            metadata.append(f"job_id={job_id}")
+        surface_name = str(runtime_log.get("surface_name") or "").strip()
+        if surface_name:
+            metadata.append(f"surface={surface_name}")
+        if metadata:
+            print(" ".join(metadata))
+
+        if index < len(runtime_logs) - 1:
+            print()
+
+
+def _is_error_runtime_log(runtime_log: dict[str, Any]) -> bool:
+    severity = str(runtime_log.get("severity") or "").strip().upper()
+    return severity in {"WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"}
+
+
+def _is_error_worker_log(worker_log: dict[str, Any]) -> bool:
+    status = str(worker_log.get("status") or "").strip().lower()
+    error = str(worker_log.get("error") or "").strip()
+    return status in {"failed", "error", "cancelled"} or bool(error)
+
+
+def _filter_run_logs_payload(payload: dict[str, Any], *, errors_only: bool) -> dict[str, Any]:
+    if not errors_only:
+        return payload
+
+    filtered_payload = dict(payload)
+    worker_logs = payload.get("worker_logs")
+    runtime_logs = payload.get("runtime_logs")
+    warnings = payload.get("warnings")
+
+    filtered_payload["worker_logs"] = (
+        [item for item in worker_logs if isinstance(item, dict) and _is_error_worker_log(item)]
+        if isinstance(worker_logs, list)
+        else []
+    )
+    filtered_payload["runtime_logs"] = (
+        [item for item in runtime_logs if isinstance(item, dict) and _is_error_runtime_log(item)]
+        if isinstance(runtime_logs, list)
+        else []
+    )
+    filtered_payload["warnings"] = warnings if isinstance(warnings, list) else []
+    return filtered_payload
+
+
+def _print_run_logs(payload: dict[str, Any], fallback_run_id: str) -> None:
+    run = payload.get("run")
+    run_data = run if isinstance(run, dict) else {}
+    worker_logs = payload.get("worker_logs")
+    runtime_logs = payload.get("runtime_logs")
+    warnings = payload.get("warnings")
+    timeline_events = run_data.get("event_log_json")
+
+    print(f"Run ID: {run_data.get('id', fallback_run_id)}")
+    print(f"Status: {run_data.get('status', 'unknown')}")
+    print(f"Type: {run_data.get('run_type', 'unknown')}")
+    print(f"Mode: {run_data.get('mode', 'unknown')}")
+    print(f"Repository: {run_data.get('repo_full_name') or '-'}")
+    print(f"PR/Branch: {_run_ref_label(run_data)}")
+    print(f"Commit: {run_data.get('commit_sha') or '-'}")
+    print(f"Created: {_format_timestamp(run_data.get('created_at'))}")
+    print(f"Environment URL: {run_data.get('environment_url') or '-'}")
+    if isinstance(timeline_events, list):
+        print(f"Timeline Events: {len(timeline_events)}")
+
+    print()
+    _print_worker_logs(worker_logs if isinstance(worker_logs, list) else [])
+    print()
+    _print_runtime_logs(runtime_logs if isinstance(runtime_logs, list) else [])
+
+    if isinstance(warnings, list) and warnings:
+        print()
+        print("Warnings:")
+        for warning in warnings:
+            print(f"- {warning}")
+
+
 def run_runs_list(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
@@ -842,6 +1017,25 @@ def run_runs_status(args: argparse.Namespace) -> int:
     print(f"Created: {_format_timestamp(run.get('created_at'))}")
     print(f"Environment URL: {run.get('environment_url') or '-'}")
     print(f"Session ID: {run.get('session_id') or '-'}")
+    return 0
+
+
+def run_runs_logs(args: argparse.Namespace) -> int:
+    run_id = resolve_logs_run_id(args.run_id)
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_run_logs(run_id)
+    finally:
+        client.close()
+
+    payload = _filter_run_logs_payload(payload, errors_only=args.errors_only)
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_run_logs(payload, run_id)
     return 0
 
 
@@ -1232,6 +1426,11 @@ def run_wizard_cli(argv: list[str]) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arga")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_cli_version()}",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     login_parser = subparsers.add_parser("login", help="Authenticate the CLI")
@@ -1290,7 +1489,7 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_install_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     mcp_install_parser.set_defaults(func=run_mcp_install)
 
-    runs_parser = subparsers.add_parser("runs", help="List, inspect, or cancel validation runs")
+    runs_parser = subparsers.add_parser("runs", help="List, inspect, cancel, or read validation run logs")
     runs_subparsers = runs_parser.add_subparsers(dest="runs_command", required=True)
 
     runs_list_parser = runs_subparsers.add_parser("list", help="List recent validation runs")
@@ -1310,6 +1509,21 @@ def build_parser() -> argparse.ArgumentParser:
     runs_status_parser.add_argument("run_id", help="Validation run ID")
     runs_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     runs_status_parser.set_defaults(func=run_runs_status)
+
+    runs_logs_parser = runs_subparsers.add_parser("logs", help="Show worker and runtime logs for a validation run")
+    runs_logs_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    runs_logs_parser.add_argument(
+        "run_id",
+        nargs="?",
+        help=f"Validation run ID. Defaults to {WIZARD_SESSION_FILE} in the current directory when available.",
+    )
+    runs_logs_parser.add_argument("--json", action="store_true", help="Print the raw JSON response")
+    runs_logs_parser.add_argument(
+        "--errors-only",
+        action="store_true",
+        help="Show only failed worker logs and warning/error runtime logs",
+    )
+    runs_logs_parser.set_defaults(func=run_runs_logs)
 
     runs_cancel_parser = runs_subparsers.add_parser("cancel", help="Cancel a validation run")
     runs_cancel_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
