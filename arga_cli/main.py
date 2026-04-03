@@ -442,33 +442,11 @@ def run_validate_pr(args: argparse.Namespace) -> int:
 def _validate_help_text() -> str:
     return (
         "usage: arga validate pr --repo <owner/repo> --pr <number>\n"
-        "       arga validate url --url <url> --prompt <prompt> [--ttl <minutes>]\n"
         "       arga validate install <repo>\n"
         "       arga validate config <repo>\n"
         "       arga validate config set <repo> [--trigger pr|branch] [--branch <name>] [--comments on|off]\n\n"
         "Start validations or manage automatic validation settings."
     )
-
-
-def _build_validate_url_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="arga validate url",
-        description="Run a browser validation against a deployed URL.",
-        allow_abbrev=False,
-    )
-    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    parser.add_argument("--url", required=True, help="Deployed application URL")
-    parser.add_argument("--prompt", required=True, help="Natural language instructions for the agent")
-    parser.add_argument("--email", help="Optional login email")
-    parser.add_argument("--password", help="Optional login password")
-    parser.add_argument(
-        "--ttl",
-        type=int,
-        default=None,
-        help="Run duration in minutes (Team/Paid: 1-480, default 60; Free: fixed at 10)",
-    )
-    parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    return parser
 
 
 def _build_validate_pr_parser() -> argparse.ArgumentParser:
@@ -912,8 +890,6 @@ def run_validate_cli(argv: list[str]) -> int:
 
     if argv[0] == "pr":
         return run_validate_pr(_build_validate_pr_parser().parse_args(argv[1:]))
-    if argv[0] == "url":
-        return run_test_url(_build_validate_url_parser().parse_args(argv[1:]))
     if argv[0] == "install":
         return run_validate_install(_build_validate_install_parser().parse_args(argv[1:]))
     if argv[0] == "config":
