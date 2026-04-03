@@ -106,12 +106,6 @@ arga runs status <run_id>
 arga runs cancel <run_id>
 ```
 
-`arga validate url` is also available and currently behaves the same as `arga test url`:
-
-```bash
-arga validate url --url https://demo-app.com --prompt "test checkout"
-```
-
 ## Command Reference
 
 ### Authentication
@@ -130,7 +124,6 @@ arga logout
 
 ```bash
 arga test url --url https://demo-app.com --prompt "test login flow"
-arga validate url --url https://demo-app.com --prompt "test checkout"
 arga validate pr --repo arga-labs/validation-server --pr 182
 arga validate install arga-labs/validation-server
 arga validate config arga-labs/validation-server
@@ -138,10 +131,9 @@ arga validate config set arga-labs/validation-server --trigger branch --branch m
 ```
 
 - `arga test url` starts a one-off validation against a deployed URL.
-- `arga validate url` is an equivalent URL-validation entry point under the `validate` namespace.
 - `arga validate pr` starts GitHub-backed PR validation for a repository and pull request number.
 
-All three accept `--json` to output `{"run_id": "...", "status": "..."}` instead of human-readable text.
+Both accept `--json` to output `{"run_id": "...", "status": "..."}` instead of human-readable text.
 - `arga validate install <repo>` installs the GitHub webhook for automatic validation on a repository.
 - `arga validate config <repo>` shows the current automatic validation settings, including install state, trigger mode, selected branch, and PR comment behavior.
 - `arga validate config set <repo>` updates the automatic validation settings. Any omitted options keep their current value.
@@ -270,7 +262,6 @@ Commands that support `--json`:
 |---|---|
 | `arga test url` | `{"run_id": "...", "status": "..."}` |
 | `arga validate pr` | `{"run_id": "...", "status": "..."}` |
-| `arga validate url` | `{"run_id": "...", "status": "..."}` |
 | `arga runs status <id>` | Full run object |
 | `arga runs list` | Array of run summaries |
 
@@ -293,7 +284,6 @@ To point it at another environment, pass `--api-url` or set `ARGA_API_URL`:
 arga login --api-url http://localhost:8000
 arga mcp install --api-url http://localhost:8000
 arga test url --api-url http://localhost:8000 --url https://demo-app.com --prompt "test checkout"
-arga validate url --api-url http://localhost:8000 --url https://demo-app.com --prompt "test checkout"
 arga validate pr --api-url http://localhost:8000 --repo arga-labs/validation-server --pr 182
 ```
 
