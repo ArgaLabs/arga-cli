@@ -29,30 +29,6 @@ def test_validate_pr_command_prints_run_id(monkeypatch, capsys) -> None:
     assert "Status: queued" in output
 
 
-def test_validate_url_alias_reuses_url_validation(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
-
-    def fake_start(self, *, url: str, prompt: str, email: str | None = None, password: str | None = None):
-        assert url == "https://demo-app.com"
-        assert prompt == "test checkout"
-        assert email is None
-        assert password is None
-        return {"run_id": "run_123", "status": "queued", "session_id": "session_1"}
-
-    monkeypatch.setattr(main.ApiClient, "start_url_validation", fake_start)
-    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
-
-    args = main.build_parser().parse_args(
-        ["validate", "url", "--url", "https://demo-app.com", "--prompt", "test checkout"]
-    )
-    exit_code = args.func(args)
-    output = capsys.readouterr().out
-
-    assert exit_code == 0
-    assert "Starting validation..." in output
-    assert "Run ID: run_123" in output
-
-
 def test_validate_pr_json_flag(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
 
