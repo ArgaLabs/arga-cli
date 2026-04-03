@@ -47,7 +47,7 @@ def test_scan_start_polls_until_plan_ready_and_auto_approves(monkeypatch: pytest
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert "Starting app scan..." in output
+    assert "Starting agent run..." in output
     assert "URL: https://demo-app.com" in output
     assert "Budget: 200" in output
     assert "Run ID: run_scan_123" in output

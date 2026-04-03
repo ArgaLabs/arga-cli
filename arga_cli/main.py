@@ -99,7 +99,7 @@ class ApiClient:
         if ttl_minutes is not None:
             payload["ttl_minutes"] = ttl_minutes
         response = self._client.post(
-            f"{self._api_url}/validate/url",
+            f"{self._api_url}/validate/url-run",
             json=payload,
             headers=self._auth_headers(),
         )
@@ -118,13 +118,13 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to start PR validation")
 
-    def start_redteam_scan(self, *, url: str, action_budget: int) -> dict[str, Any]:
+    def start_redteam_scan(self, *, url: str, action_budget: int, focus: str | None = None) -> dict[str, Any]:
         response = self._client.post(
-            f"{self._api_url}/redteam/start",
-            json={"url": url, "action_budget": action_budget},
+            f"{self._api_url}/validate/agent-run",
+            json={"url": url, "action_budget": action_budget, "focus": focus},
             headers=self._auth_headers(),
         )
-        return self._parse_json(response, "Failed to start app scan")
+        return self._parse_json(response, "Failed to start agent run")
 
     def approve_redteam_scan(self, run_id: str) -> dict[str, Any]:
         response = self._client.post(
@@ -132,7 +132,7 @@ class ApiClient:
             json={},
             headers=self._auth_headers(),
         )
-        return self._parse_json(response, "Failed to approve app scan")
+        return self._parse_json(response, "Failed to approve agent run")
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         response = self._client.get(
@@ -153,7 +153,7 @@ class ApiClient:
             f"{self._api_url}/redteam/{run_id}/report",
             headers=self._auth_headers(),
         )
-        return self._parse_json(response, "Failed to load app scan report")
+        return self._parse_json(response, "Failed to load agent run report")
 
     def list_pr_validation_runs(
         self,
@@ -626,18 +626,18 @@ def _scan_help_text() -> str:
         "usage: arga scan <url> [--budget 200]\n"
         "       arga scan status <run_id>\n"
         "       arga scan report <run_id>\n\n"
-        "Start or inspect Arga app scans."
+        "Start or inspect Arga agent runs."
     )
 
 
 def _build_scan_start_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="arga scan",
-        description="Start an Arga app scan.",
+        description="Start an Arga agent run.",
         allow_abbrev=False,
     )
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    parser.add_argument("url", help="Public application URL to scan")
+    parser.add_argument("url", help="Public application URL to explore")
     parser.add_argument("--budget", type=int, default=200, help="Total action budget for the scan")
     return parser
 
@@ -645,7 +645,7 @@ def _build_scan_start_parser() -> argparse.ArgumentParser:
 def _build_scan_status_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="arga scan status",
-        description="Check the status of an Arga app scan.",
+        description="Check the status of an Arga agent run.",
         allow_abbrev=False,
     )
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -656,7 +656,7 @@ def _build_scan_status_parser() -> argparse.ArgumentParser:
 def _build_scan_report_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="arga scan report",
-        description="View the final report for an Arga app scan.",
+        description="View the final report for an Arga agent run.",
         allow_abbrev=False,
     )
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -712,12 +712,12 @@ def run_scan_start(args: argparse.Namespace) -> int:
         payload = client.start_redteam_scan(url=args.url, action_budget=args.budget)
         run_id = str(payload.get("run_id") or "")
         if not run_id:
-            raise CliError("App scan started but no run ID was returned.")
+            raise CliError("Agent run started but no run ID was returned.")
         run = _wait_for_scan_approval(client, run_id)
     finally:
         client.close()
 
-    print("Starting app scan...\n")
+    print("Starting agent run...\n")
     print(f"URL: {args.url}")
     print(f"Budget: {args.budget}")
     print(f"Run ID: {run_id}")
@@ -1542,7 +1542,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("commit", help="Wrap git commit and optionally mark it to skip Arga validation")
     subparsers.add_parser("push", help="Wrap git push and verify skip state when requested")
-    subparsers.add_parser("scan", help="Start an app scan or inspect a scan run")
+    subparsers.add_parser("scan", help="Start an agent run or inspect a scan run")
     return parser
 
 
