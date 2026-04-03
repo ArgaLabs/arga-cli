@@ -376,7 +376,7 @@ def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
     billing_plan = me.get("billing_plan", "free")
 
     if billing_plan in ("team", "paid"):
-        return requested_ttl  # None means server default (60 min)
+        return requested_ttl  # None means server default (30 min)
 
     # Free tier — locked to 10 minutes
     if requested_ttl is not None and requested_ttl != FREE_TTL:
@@ -1095,7 +1095,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--ttl",
         type=int,
         default=None,
-        help="Run duration in minutes (Team/Paid: 1-480, default 60; Free: fixed at 10)",
+        help="Run duration in minutes (Team/Paid: 1-480, default 30; Free: fixed at 10)",
     )
     test_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     test_url_parser.set_defaults(func=run_test_url)
