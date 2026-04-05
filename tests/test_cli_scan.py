@@ -20,7 +20,7 @@ def test_scan_start_polls_until_plan_ready_and_auto_approves(monkeypatch: pytest
         ]
     )
 
-    def fake_start(self, *, url: str, action_budget: int):
+    def fake_start(self, *, url: str, action_budget: int, focus: str | None = None, scenario_id: str | None = None):
         assert url == "https://demo-app.com"
         assert action_budget == 200
         return {"run_id": "run_scan_123", "status": "planning"}

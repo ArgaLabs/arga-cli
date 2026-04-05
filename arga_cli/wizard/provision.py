@@ -32,6 +32,7 @@ def provision_twins(
     *,
     ttl_minutes: int = 10,
     scenario_prompt: str | None = None,
+    scenario_id: str | None = None,
 ) -> dict:
     """Provision twins and poll until ready, showing progress."""
     header("Provisioning twin instances...")
@@ -39,6 +40,8 @@ def provision_twins(
     payload: dict[str, Any] = {"twins": twins, "ttl_minutes": ttl_minutes, "scenario": "quickstart"}
     if scenario_prompt:
         payload["scenario_prompt"] = scenario_prompt
+    if scenario_id:
+        payload["scenario_id"] = scenario_id
 
     response = client._client.post(
         f"{client._api_url}/validate/twins/provision",

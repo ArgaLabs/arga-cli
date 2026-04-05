@@ -51,14 +51,20 @@ def run_wizard(
         return 1
 
     # Step 3: Describe desired twin state (optional)
-    scenario_prompt = describe_scenario(selected)
+    scenario_prompt, scenario_id = describe_scenario(selected, api_client=client)
 
     # Step 4: .env rewriting
     env_changes = rewrite_env_files(cwd, selected, shape_detect=shape_detect)
 
     # Step 5: Provision
     try:
-        status = provision_twins(client, selected, ttl_minutes=10, scenario_prompt=scenario_prompt)
+        status = provision_twins(
+            client,
+            selected,
+            ttl_minutes=10,
+            scenario_prompt=scenario_prompt,
+            scenario_id=scenario_id,
+        )
     except Exception as exc:
         error(f"\n  Provisioning failed: {exc}")
         if env_changes:

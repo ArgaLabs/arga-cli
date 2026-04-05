@@ -86,6 +86,7 @@ class ApiClient:
         email: str | None = None,
         password: str | None = None,
         ttl_minutes: int | None = None,
+        scenario_id: str | None = None,
     ) -> dict[str, str]:
         payload: dict[str, object] = {
             "url": url,
@@ -98,6 +99,8 @@ class ApiClient:
             }
         if ttl_minutes is not None:
             payload["ttl_minutes"] = ttl_minutes
+        if scenario_id is not None:
+            payload["scenario_id"] = scenario_id
         response = self._client.post(
             f"{self._api_url}/validate/url-run",
             json=payload,
@@ -118,10 +121,15 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to start PR validation")
 
-    def start_redteam_scan(self, *, url: str, action_budget: int, focus: str | None = None) -> dict[str, Any]:
+    def start_redteam_scan(
+        self, *, url: str, action_budget: int, focus: str | None = None, scenario_id: str | None = None
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"url": url, "action_budget": action_budget, "focus": focus}
+        if scenario_id is not None:
+            payload["scenario_id"] = scenario_id
         response = self._client.post(
             f"{self._api_url}/validate/agent-run",
-            json={"url": url, "action_budget": action_budget, "focus": focus},
+            json=payload,
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to start agent run")
@@ -216,6 +224,74 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to save validation config")
+
+    def list_scenarios(
+        self,
+        *,
+        twin: str | None = None,
+        tag: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str] = {}
+        if twin:
+            params["twin"] = twin
+        if tag:
+            params["tag"] = tag
+        response = self._client.get(
+            f"{self._api_url}/scenarios",
+            params=params,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to list scenarios")
+
+    def get_scenario(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/scenarios/{scenario_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load scenario")
+
+    def create_scenario(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        prompt: str | None = None,
+        seed_config: dict[str, Any] | None = None,
+        twins: list[str] | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"name": name}
+        if description is not None:
+            payload["description"] = description
+        if prompt is not None:
+            payload["prompt"] = prompt
+        if seed_config is not None:
+            payload["seed_config"] = seed_config
+        if twins is not None:
+            payload["twins"] = twins
+        if tags is not None:
+            payload["tags"] = tags
+        response = self._client.post(
+            f"{self._api_url}/scenarios",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to create scenario")
+
+    def update_scenario(self, scenario_id: str, **kwargs: Any) -> dict[str, Any]:
+        response = self._client.put(
+            f"{self._api_url}/scenarios/{scenario_id}",
+            json=kwargs,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to update scenario")
+
+    def delete_scenario(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.delete(
+            f"{self._api_url}/scenarios/{scenario_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to delete scenario")
 
     def _auth_headers(self) -> dict[str, str]:
         if not self._api_key:
@@ -423,8 +499,7 @@ def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
     # Free tier — locked to 10 minutes
     if requested_ttl is not None and requested_ttl != FREE_TTL:
         raise CliError(
-            f"Free plan runs are limited to {FREE_TTL} minutes. "
-            f"Upgrade to Team for custom TTL (up to 480 minutes)."
+            f"Free plan runs are limited to {FREE_TTL} minutes. Upgrade to Team for custom TTL (up to 480 minutes)."
         )
     return FREE_TTL
 
@@ -437,12 +512,14 @@ def run_test_url(args: argparse.Namespace) -> int:
     client = ApiClient(args.api_url, api_key=api_key)
     try:
         ttl_minutes = _resolve_ttl(client, getattr(args, "ttl", None))
+        scenario_id = getattr(args, "scenario", None)
         payload = client.start_url_validation(
             url=args.url,
             prompt=args.prompt,
             email=args.email,
             password=args.password,
             ttl_minutes=ttl_minutes,
+            scenario_id=scenario_id,
         )
     finally:
         client.close()
@@ -639,6 +716,7 @@ def _build_scan_start_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     parser.add_argument("url", help="Public application URL to explore")
     parser.add_argument("--budget", type=int, default=200, help="Total action budget for the scan")
+    parser.add_argument("--scenario", default=None, help="Scenario ID to use for this scan")
     return parser
 
 
@@ -709,7 +787,10 @@ def run_scan_start(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        payload = client.start_redteam_scan(url=args.url, action_budget=args.budget)
+        scenario_id = getattr(args, "scenario", None)
+        payload = client.start_redteam_scan(
+            url=args.url, action_budget=args.budget, focus=None, scenario_id=scenario_id
+        )
         run_id = str(payload.get("run_id") or "")
         if not run_id:
             raise CliError("Agent run started but no run ID was returned.")
@@ -1227,6 +1308,298 @@ def run_push_cli(argv: list[str]) -> int:
     return _run_git_command(["push", *git_args])
 
 
+def _scenarios_help_text() -> str:
+    return (
+        "usage: arga scenarios <command> [options]\n\n"
+        "Commands:\n"
+        "  list                     List saved scenarios\n"
+        "  create --name <name>     Create a new scenario\n"
+        "  show <id>                Show scenario details\n"
+        "  update <id>              Update a scenario\n"
+        "  delete <id>              Delete a scenario\n\n"
+        "Options:\n"
+        "  --json         Output as JSON\n"
+        "  -h, --help     Show this help"
+    )
+
+
+def _build_scenarios_list_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arga scenarios list",
+        description="List saved scenarios.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("--twin", default=None, help="Filter by twin name")
+    parser.add_argument("--tag", default=None, help="Filter by tag")
+    parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    return parser
+
+
+def _build_scenarios_create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arga scenarios create",
+        description="Create a new scenario.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("--name", required=True, help="Scenario name")
+    parser.add_argument("--description", default=None, help="Scenario description")
+    parser.add_argument("--prompt", default=None, help="Natural language scenario prompt")
+    parser.add_argument("--config", default=None, help="Path to a JSON config file with seed_config")
+    parser.add_argument("--twins", default=None, help="Comma-separated list of twin names")
+    parser.add_argument("--tags", default=None, help="Comma-separated list of tags")
+    parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    return parser
+
+
+def _build_scenarios_show_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arga scenarios show",
+        description="Show scenario details.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("scenario_id", help="Scenario ID")
+    parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    return parser
+
+
+def _build_scenarios_update_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arga scenarios update",
+        description="Update a scenario.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("scenario_id", help="Scenario ID")
+    parser.add_argument("--name", default=None, help="New scenario name")
+    parser.add_argument("--description", default=None, help="New scenario description")
+    parser.add_argument("--prompt", default=None, help="New scenario prompt")
+    parser.add_argument("--tags", default=None, help="Comma-separated list of tags")
+    return parser
+
+
+def _build_scenarios_delete_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arga scenarios delete",
+        description="Delete a scenario.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("scenario_id", help="Scenario ID")
+    return parser
+
+
+def run_scenarios_list(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenarios = client.list_scenarios(twin=args.twin, tag=args.tag)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(scenarios, indent=2))
+        return 0
+
+    if not scenarios:
+        print("No scenarios found.")
+        return 0
+
+    from rich.table import Table
+
+    from arga_cli.wizard.output import console
+
+    table = Table(title="Scenarios")
+    table.add_column("ID", style="dim")
+    table.add_column("Name", style="bold")
+    table.add_column("Twins")
+    table.add_column("Tags")
+    table.add_column("Created")
+
+    for s in scenarios:
+        twins = ", ".join(s.get("twins") or [])
+        tags = ", ".join(s.get("tags") or [])
+        created = _format_timestamp(s.get("created_at"))
+        table.add_row(
+            str(s.get("id", "-")),
+            str(s.get("name", "-")),
+            twins or "-",
+            tags or "-",
+            created,
+        )
+
+    console.print(table)
+    return 0
+
+
+def run_scenarios_create(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+
+    seed_config = None
+    if args.config:
+        config_path = Path(args.config)
+        if not config_path.exists():
+            raise CliError(f"Config file not found: {args.config}")
+        try:
+            seed_config = json.loads(config_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise CliError(f"Invalid JSON in config file: {args.config}") from exc
+
+    twins = [t.strip() for t in args.twins.split(",")] if args.twins else None
+    tags = [t.strip() for t in args.tags.split(",")] if args.tags else None
+
+    try:
+        scenario = client.create_scenario(
+            name=args.name,
+            description=args.description,
+            prompt=args.prompt,
+            seed_config=seed_config,
+            twins=twins,
+            tags=tags,
+        )
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(scenario, indent=2))
+        return 0
+
+    print(f"Created scenario: {scenario.get('name', args.name)}")
+    print(f"ID: {scenario.get('id', '-')}")
+    return 0
+
+
+def run_scenarios_show(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenario = client.get_scenario(args.scenario_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(scenario, indent=2))
+        return 0
+
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from arga_cli.wizard.output import console
+
+    lines = Text()
+    lines.append(f"Name: {scenario.get('name', '-')}\n", style="bold")
+    lines.append(f"ID: {scenario.get('id', '-')}\n", style="dim")
+
+    description = scenario.get("description")
+    if description:
+        lines.append(f"Description: {description}\n")
+
+    prompt = scenario.get("prompt")
+    if prompt:
+        lines.append(f"Prompt: {prompt}\n")
+
+    twins = scenario.get("twins") or []
+    if twins:
+        twin_badges = " ".join(f"[{t}]" for t in twins)
+        lines.append(f"Twins: {twin_badges}\n")
+
+    tags = scenario.get("tags") or []
+    if tags:
+        tag_badges = " ".join(f"#{t}" for t in tags)
+        lines.append(f"Tags: {tag_badges}\n")
+
+    seed_config = scenario.get("seed_config")
+    if seed_config and isinstance(seed_config, dict):
+        entity_count = sum(len(v) if isinstance(v, (list, dict)) else 1 for v in seed_config.values())
+        lines.append(f"Seed config: {len(seed_config)} section(s), ~{entity_count} entities\n")
+
+    created = _format_timestamp(scenario.get("created_at"))
+    updated = _format_timestamp(scenario.get("updated_at"))
+    lines.append(f"Created: {created}\n")
+    lines.append(f"Updated: {updated}\n")
+
+    console.print(Panel(lines, title="Scenario Details", border_style="cyan"))
+    return 0
+
+
+def run_scenarios_update(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+
+    kwargs: dict[str, Any] = {}
+    if args.name is not None:
+        kwargs["name"] = args.name
+    if args.description is not None:
+        kwargs["description"] = args.description
+    if args.prompt is not None:
+        kwargs["prompt"] = args.prompt
+    if args.tags is not None:
+        kwargs["tags"] = [t.strip() for t in args.tags.split(",")]
+
+    if not kwargs:
+        raise CliError("No fields to update. Use --name, --description, --prompt, or --tags.")
+
+    try:
+        scenario = client.update_scenario(args.scenario_id, **kwargs)
+    finally:
+        client.close()
+
+    print(f"Updated scenario: {scenario.get('name', '-')}")
+    print(f"ID: {scenario.get('id', args.scenario_id)}")
+    return 0
+
+
+def run_scenarios_delete(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+
+    # Confirmation prompt
+    try:
+        import questionary
+
+        confirmed = questionary.confirm(
+            f"Delete scenario {args.scenario_id}?",
+            default=False,
+        ).ask()
+        if not confirmed:
+            print("Cancelled.")
+            return 0
+    except (ImportError, EOFError):
+        pass  # Non-interactive — proceed without confirmation
+
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        client.delete_scenario(args.scenario_id)
+    finally:
+        client.close()
+
+    print(f"Deleted scenario {args.scenario_id}.")
+    return 0
+
+
+def run_scenarios_cli(argv: list[str]) -> int:
+    if not argv or argv[0] in {"-h", "--help"}:
+        print(_scenarios_help_text())
+        return 0
+
+    command = argv[0]
+
+    if command == "list":
+        return run_scenarios_list(_build_scenarios_list_parser().parse_args(argv[1:]))
+    if command == "create":
+        return run_scenarios_create(_build_scenarios_create_parser().parse_args(argv[1:]))
+    if command == "show":
+        return run_scenarios_show(_build_scenarios_show_parser().parse_args(argv[1:]))
+    if command == "update":
+        return run_scenarios_update(_build_scenarios_update_parser().parse_args(argv[1:]))
+    if command == "delete":
+        return run_scenarios_delete(_build_scenarios_delete_parser().parse_args(argv[1:]))
+
+    raise CliError(f"Unknown scenarios subcommand: {command}")
+
+
 def _wizard_help_text() -> str:
     return (
         "usage: arga wizard [command] [options]\n\n"
@@ -1474,6 +1847,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Run duration in minutes (Team/Paid: 1-480, default 30; Free: fixed at 10)",
     )
+    test_url_parser.add_argument("--scenario", default=None, help="Scenario ID to use for this validation")
     test_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     test_url_parser.set_defaults(func=run_test_url)
 
@@ -1543,6 +1917,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("commit", help="Wrap git commit and optionally mark it to skip Arga validation")
     subparsers.add_parser("push", help="Wrap git push and verify skip state when requested")
     subparsers.add_parser("scan", help="Start an agent run or inspect a scan run")
+    subparsers.add_parser("scenarios", help="Manage saved scenarios (run `arga scenarios --help` for subcommands)")
     return parser
 
 
@@ -1556,6 +1931,8 @@ def main() -> None:
             exit_code = run_validate_cli(sys.argv[2:])
         elif len(sys.argv) > 1 and sys.argv[1] == "scan":
             exit_code = run_scan_cli(sys.argv[2:])
+        elif len(sys.argv) > 1 and sys.argv[1] == "scenarios":
+            exit_code = run_scenarios_cli(sys.argv[2:])
         elif len(sys.argv) > 1 and sys.argv[1] == "wizard":
             exit_code = run_wizard_cli(sys.argv[2:])
         else:
