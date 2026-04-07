@@ -167,10 +167,14 @@ class ApiClient:
         *,
         repo: str,
         pr_number: int,
+        context_notes: str | None = None,
     ) -> dict[str, str]:
+        payload: dict[str, Any] = {"repo": repo, "pr_number": pr_number}
+        if context_notes:
+            payload["context_notes"] = context_notes
         response = self._client.post(
             f"{self._api_url}/validation/pr",
-            json={"repo": repo, "pr_number": pr_number},
+            json=payload,
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to start PR validation")
@@ -616,7 +620,7 @@ def run_validate_pr(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        payload = client.start_pr_validation(repo=args.repo, pr_number=args.pr)
+        payload = client.start_pr_validation(repo=args.repo, pr_number=args.pr, context_notes=getattr(args, "context_notes", None))
     finally:
         client.close()
 
@@ -1690,6 +1694,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
+    validate_pr_parser.add_argument("--context-notes", default=None, help="Additional instructions or context for the validation")
     validate_pr_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     validate_pr_parser.set_defaults(func=run_validate_pr)
 
