@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from arga_cli.entry import build_entry_parser
 from arga_cli.mcp import install_mcp_configuration
 
 DEFAULT_API_URL = os.environ.get("ARGA_API_URL", "https://api.argalabs.com")
@@ -1771,6 +1772,8 @@ def build_parser() -> argparse.ArgumentParser:
     twins_teardown_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     twins_teardown_parser.add_argument("provision_id", help="Provision ID")
     twins_teardown_parser.set_defaults(func=run_twins_teardown)
+
+    build_entry_parser(subparsers)
 
     subparsers.add_parser("wizard", help="Twins quickstart wizard (run `arga wizard --help` for subcommands)")
 
