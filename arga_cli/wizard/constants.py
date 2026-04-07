@@ -49,17 +49,23 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.notion.com", "notion.so"],
         "show_in_ui": True,
     },
+    "github": {
+        "label": "GitHub",
+        "port": 12120,
+        "intercept_domains": ["api.github.com", "github.com"],
+        "show_in_ui": True,
+    },
     "unstructured": {
         "label": "Unstructured",
         "port": 12118,
         "intercept_domains": ["api.unstructuredapp.io", "platform.unstructuredapp.io"],
-        "show_in_ui": True,
+        "show_in_ui": False,
     },
     "stripe": {
         "label": "Stripe",
         "port": 12111,
         "intercept_domains": ["api.stripe.com", "files.stripe.com", "connect.stripe.com"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "box": {
         "label": "Box",
@@ -71,7 +77,7 @@ TWIN_CATALOG: dict[str, dict] = {
         "label": "Google Calendar",
         "port": 12117,
         "intercept_domains": ["www.googleapis.com/calendar/v3"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "unified": {
         "label": "Unified",
@@ -93,8 +99,8 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "defaults": {"DISCORD_TOKEN": "fake-bot-token"},
     },
     "slack": {
-        "token_vars": ["SLACK_BOT_TOKEN", "SLACK_TOKEN", "SLACK_API_TOKEN"],
-        "url_vars": ["SLACK_API_URL", "SLACK_BASE_URL"],
+        "token_vars": ["SLACK_BOT_TOKEN", "SLACK_TOKEN", "SLACK_API_TOKEN", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"],
+        "url_vars": ["SLACK_API_URL", "SLACK_BASE_URL", "SLACK_TWIN_BASE_URL"],
         "secret_vars": ["SLACK_SIGNING_SECRET"],
         "defaults": {
             "SLACK_BOT_TOKEN": "xoxb-F9SXMECOSFOGYR3XKXWN",
@@ -103,8 +109,8 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
     },
     "stripe": {
         "token_vars": ["STRIPE_SECRET_KEY", "STRIPE_API_KEY", "STRIPE_KEY"],
-        "url_vars": ["STRIPE_API_URL", "STRIPE_BASE_URL"],
-        "secret_vars": [],
+        "url_vars": ["STRIPE_API_URL", "STRIPE_BASE_URL", "STRIPE_TWIN_BASE_URL"],
+        "secret_vars": ["STRIPE_TWIN_WEBHOOK_SECRET"],
         "defaults": {},
     },
     "google_drive": {
@@ -140,6 +146,12 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
             "NOTION_API_KEY": "secret_notion-twin_seed",
             "NOTION_TOKEN": "secret_notion-twin_seed",
         },
+    },
+    "github": {
+        "token_vars": ["GITHUB_TOKEN", "GITHUB_ACCESS_TOKEN", "GH_TOKEN"],
+        "url_vars": ["GITHUB_API_URL", "GITHUB_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {"GITHUB_TOKEN": "ghp_test-github-twin-token"},
     },
     "box": {
         "token_vars": ["BOX_CLIENT_ID", "BOX_CLIENT_SECRET", "BOX_DEVELOPER_TOKEN", "BOX_ACCESS_TOKEN"],
@@ -290,6 +302,12 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
     "notion": [
         'Workspace: "Notion Twin Workspace"',
         "API key: secret_notion-twin_seed",
+    ],
+    "github": [
+        'User: "testuser" (Test User)',
+        'Organization: "test-org" (Test Organization)',
+        'Repository: "test-org/demo-repo" (public, Python)',
+        "Token: ghp_test-github-twin-token",
     ],
     "unstructured": [
         "Partition endpoint: /general/v0/general",
