@@ -117,13 +117,57 @@ def select_twins(max_twins: int | None = None) -> list[str]:
     return selected if selected else []
 
 
-def describe_scenario(selected_twins: list[str]) -> str | None:
-    """Ask the user to describe desired twin state in natural language."""
+def describe_scenario(
+    selected_twins: list[str],
+    api_client: object | None = None,
+) -> tuple[str | None, str | None]:
+    """Ask the user to describe desired twin state or pick a saved scenario.
+
+    Returns a (scenario_prompt, scenario_id) tuple. At most one will be set.
+    """
     twin_labels = ", ".join(TWIN_CATALOG.get(t, {}).get("label", t) for t in selected_twins)
 
     from arga_cli.wizard.output import header
 
     header("Describe your test data")
+
+    # Try to fetch saved scenarios
+    saved_scenarios: list[dict] = []
+    if api_client is not None:
+        try:
+            saved_scenarios = api_client.list_scenarios()  # type: ignore[attr-defined]
+        except Exception:
+            pass  # Non-fatal — fall back to manual entry
+
+    if saved_scenarios:
+        choices = [
+            questionary.Choice(title="Describe a new scenario", value="__new__"),
+            questionary.Choice(title="Skip (use default state)", value="__skip__"),
+            questionary.Separator("-- Saved scenarios --"),
+        ]
+        for s in saved_scenarios:
+            label = s.get("name", "Unnamed")
+            tags = s.get("tags") or []
+            tag_suffix = f"  [{', '.join(tags)}]" if tags else ""
+            choices.append(questionary.Choice(title=f"{label}{tag_suffix}", value=s.get("id", "")))
+
+        selected = questionary.select(
+            "Use a saved scenario or describe a new one?",
+            choices=choices,
+        ).ask()
+
+        if selected is None or selected == "__skip__":
+            dim("  Skipped \u2014 twins will use default quickstart data.\n")
+            return None, None
+
+        if selected != "__new__":
+            # User picked a saved scenario
+            picked = next((s for s in saved_scenarios if s.get("id") == selected), None)
+            picked_name = picked.get("name", selected) if picked else selected
+            green(f"  Using saved scenario: {picked_name}\n")
+            return None, str(selected)
+
+    # New scenario / no saved scenarios available
     dim(
         f"  Selected twins: {twin_labels}\n"
         "  Describe what data you want each twin to have.\n"
@@ -134,7 +178,7 @@ def describe_scenario(selected_twins: list[str]) -> str | None:
 
     if not description or not description.strip():
         dim("  Skipped \u2014 twins will use default quickstart data.\n")
-        return None
+        return None, None
 
     green("  Scenario noted \u2014 will be applied after provisioning.\n")
-    return description.strip()
+    return description.strip(), None
