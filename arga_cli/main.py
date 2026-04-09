@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from arga_cli.entry import build_entry_parser
 from arga_cli.mcp import install_mcp_configuration
 
 DEFAULT_API_URL = os.environ.get("ARGA_API_URL", "https://api.argalabs.com")
@@ -86,6 +87,11 @@ class ApiClient:
         email: str | None = None,
         password: str | None = None,
         ttl_minutes: int | None = None,
+        repo: str | None = None,
+        branch: str | None = None,
+        pr_url: str | None = None,
+        provision_id: str | None = None,
+        twins: list[str] | None = None,
     ) -> dict[str, str]:
         payload: dict[str, object] = {
             "url": url,
@@ -98,12 +104,64 @@ class ApiClient:
             }
         if ttl_minutes is not None:
             payload["ttl_minutes"] = ttl_minutes
+        if repo is not None:
+            payload["repo"] = repo
+        if branch is not None:
+            payload["branch"] = branch
+        if pr_url is not None:
+            payload["pr_url"] = pr_url
+        if provision_id is not None:
+            payload["provision_id"] = provision_id
+        if twins:
+            payload["twins"] = twins
         response = self._client.post(
             f"{self._api_url}/validate/url-run",
             json=payload,
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to start URL validation")
+
+    def provision_twins(
+        self,
+        *,
+        twins: list[str],
+        ttl_minutes: int = 60,
+        scenario_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, object] = {
+            "twins": twins,
+            "ttl_minutes": ttl_minutes,
+        }
+        if scenario_id is not None:
+            payload["scenario_id"] = scenario_id
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to provision twins")
+
+    def get_twin_provision_status(self, run_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/validate/twins/provision/{run_id}/status",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to get provision status")
+
+    def extend_twin_provision(self, run_id: str, *, ttl_minutes: int = 60) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/extend",
+            json={"ttl_minutes": ttl_minutes},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to extend provision")
+
+    def teardown_twin_provision(self, run_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/teardown",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to teardown provision")
 
     def start_pr_validation(
         self,
@@ -427,8 +485,7 @@ def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
     # Free tier — locked to 10 minutes
     if requested_ttl is not None and requested_ttl != FREE_TTL:
         raise CliError(
-            f"Free plan runs are limited to {FREE_TTL} minutes. "
-            f"Upgrade to Team for custom TTL (up to 480 minutes)."
+            f"Free plan runs are limited to {FREE_TTL} minutes. Upgrade to Team for custom TTL (up to 480 minutes)."
         )
     return FREE_TTL
 
@@ -436,6 +493,16 @@ def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
 def run_test_url(args: argparse.Namespace) -> int:
     if bool(args.email) != bool(args.password):
         raise CliError("Both --email and --password must be provided together.")
+
+    # Read arga.yaml for defaults
+    from arga_cli.init import load_arga_yaml
+
+    arga_config = load_arga_yaml(Path.cwd())
+
+    # Auto-populate twins from arga.yaml if not explicitly provided
+    twins: list[str] | None = None
+    if arga_config and arga_config.get("integrations") and not getattr(args, "twins", None):
+        twins = [i["twin"] for i in arga_config["integrations"] if isinstance(i, dict) and "twin" in i]
 
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
@@ -447,6 +514,10 @@ def run_test_url(args: argparse.Namespace) -> int:
             email=args.email,
             password=args.password,
             ttl_minutes=ttl_minutes,
+            repo=args.repo,
+            branch=args.branch,
+            provision_id=getattr(args, "provision_id", None),
+            twins=twins if twins else None,
         )
     finally:
         client.close()
@@ -458,9 +529,91 @@ def run_test_url(args: argparse.Namespace) -> int:
     print("Starting validation...\n")
     print(f"URL: {args.url}")
     print(f"Prompt: {args.prompt}")
+    if args.repo:
+        print(f"Repository: {args.repo}")
+    if args.branch:
+        print(f"Branch: {args.branch}")
     print(f"TTL: {ttl_minutes} minutes\n")
     print(f"Run ID: {payload.get('run_id', 'unknown')}")
     print(f"Status: {payload.get('status', 'unknown')}")
+    return 0
+
+
+def run_twins_provision(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        twins = [t.strip() for t in args.twins.split(",") if t.strip()]
+        if not twins:
+            raise CliError("At least one twin name is required.")
+        payload = client.provision_twins(
+            twins=twins,
+            ttl_minutes=getattr(args, "ttl", 60),
+            scenario_id=getattr(args, "scenario", None),
+        )
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload))
+        return 0
+
+    print("Provisioning twins...\n")
+    print(f"Twins: {args.twins}")
+    print(f"Provision ID: {payload.get('run_id', 'unknown')}")
+    print("\nPoll status with: arga twins status " + payload.get("run_id", "<id>"))
+    return 0
+
+
+def run_twins_status(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_twin_provision_status(args.provision_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload))
+        return 0
+
+    status = payload.get("status", "unknown")
+    print(f"Status: {status}")
+    twins_info = payload.get("twins", {})
+    if twins_info:
+        print("\nTwin endpoints:")
+        for name, info in twins_info.items():
+            base_url = info.get("base_url", "")
+            print(f"  {name}: {base_url}")
+            env_vars = info.get("env_vars", {})
+            for k, v in env_vars.items():
+                print(f"    {k}={v}")
+    if payload.get("expires_at"):
+        print(f"\nExpires: {payload['expires_at']}")
+    return 0
+
+
+def run_twins_extend(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        client.extend_twin_provision(args.provision_id, ttl_minutes=args.minutes)
+    finally:
+        client.close()
+
+    print(f"Extended by {args.minutes} minutes.")
+    return 0
+
+
+def run_twins_teardown(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.teardown_twin_provision(args.provision_id)
+    finally:
+        client.close()
+
+    print(f"Teardown initiated. Status: {payload.get('status', 'unknown')}")
     return 0
 
 
@@ -623,6 +776,51 @@ def run_mcp_install(args: argparse.Namespace) -> int:
         print("\nInstall Arga MCP manually by adding the generated config to your IDE.")
         return 1
     return 1 if failures else 0
+
+
+def run_init(args: argparse.Namespace) -> int:
+    from arga_cli.init import detect_integrations, generate_arga_yaml
+
+    repo_root = Path.cwd()
+    print("Scanning repository for integrations...\n")
+
+    detected = detect_integrations(repo_root)
+
+    if not detected:
+        print("No integrations detected.")
+        print("You can manually create an arga.yaml file.")
+        return 0
+
+    print("Found integrations:")
+    for d in detected:
+        marker = "\u2713" if d["confidence"] == "high" else "?"
+        print(f"  [{marker}] {d['name']} \u2014 {d['source']}")
+
+    print()
+    confirm = input("Generate arga.yaml with these integrations? (Y/n): ").strip().lower()
+    if confirm and confirm != "y":
+        print("Aborted.")
+        return 0
+
+    yaml_content = generate_arga_yaml(detected)
+    output_path = repo_root / "arga.yaml"
+    output_path.write_text(yaml_content)
+    print(f"\nGenerated {output_path}")
+
+    # Also run MCP install
+    try:
+        api_key = load_api_key()
+        api_url = args.api_url if hasattr(args, "api_url") else DEFAULT_API_URL
+        installed, _failed = install_mcp_configuration(api_url=api_url, api_key=api_key)
+        if installed:
+            print(f"Installed MCP config for {installed} IDE(s).")
+    except Exception:
+        pass  # MCP install is best-effort
+
+    print("\nDone! Next steps:")
+    print("  1. Review arga.yaml and adjust as needed")
+    print("  2. Run: arga test url --url <your-staging-url> --prompt 'test the app'")
+    return 0
 
 
 def _scan_help_text() -> str:
@@ -1463,6 +1661,10 @@ def build_parser() -> argparse.ArgumentParser:
     whoami_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     whoami_parser.set_defaults(func=run_whoami)
 
+    init_parser = subparsers.add_parser("init", help="Scan repo and generate arga.yaml")
+    init_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    init_parser.set_defaults(func=run_init)
+
     test_parser = subparsers.add_parser("test", help="Start validation runs")
     test_subparsers = test_parser.add_subparsers(dest="test_command", required=True)
 
@@ -1479,6 +1681,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run duration in minutes (Team/Paid: 1-480, default 30; Free: fixed at 10)",
     )
     test_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    test_url_parser.add_argument("--repo", default=None, help="Repository (owner/repo) for diff-aware test planning")
+    test_url_parser.add_argument("--branch", default=None, help="Branch name for diff-aware test planning")
+    test_url_parser.add_argument(
+        "--provision-id", default=None, help="Link to an existing twin provision (from 'arga twins provision')"
+    )
     test_url_parser.set_defaults(func=run_test_url)
 
     validate_parser = subparsers.add_parser("validate", help="Start PR or URL validation runs")
@@ -1542,6 +1749,36 @@ def build_parser() -> argparse.ArgumentParser:
     runs_cancel_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     runs_cancel_parser.add_argument("run_id", help="Validation run ID")
     runs_cancel_parser.set_defaults(func=run_runs_cancel)
+
+    twins_parser = subparsers.add_parser("twins", help="Manage digital twin instances")
+    twins_subparsers = twins_parser.add_subparsers(dest="twins_command", required=True)
+
+    twins_provision_parser = twins_subparsers.add_parser("provision", help="Provision twin instances")
+    twins_provision_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_provision_parser.add_argument("--twins", required=True, help="Comma-separated twin names (e.g. stripe,slack)")
+    twins_provision_parser.add_argument("--ttl", type=int, default=60, help="TTL in minutes (default 60)")
+    twins_provision_parser.add_argument("--scenario", default=None, help="Scenario ID for pre-seeding")
+    twins_provision_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    twins_provision_parser.set_defaults(func=run_twins_provision)
+
+    twins_status_parser = twins_subparsers.add_parser("status", help="Check provision status")
+    twins_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_status_parser.add_argument("provision_id", help="Provision ID")
+    twins_status_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    twins_status_parser.set_defaults(func=run_twins_status)
+
+    twins_extend_parser = twins_subparsers.add_parser("extend", help="Extend provision TTL")
+    twins_extend_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_extend_parser.add_argument("provision_id", help="Provision ID")
+    twins_extend_parser.add_argument("--minutes", type=int, default=60, help="Minutes to extend (default 60)")
+    twins_extend_parser.set_defaults(func=run_twins_extend)
+
+    twins_teardown_parser = twins_subparsers.add_parser("teardown", help="Tear down provision")
+    twins_teardown_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_teardown_parser.add_argument("provision_id", help="Provision ID")
+    twins_teardown_parser.set_defaults(func=run_twins_teardown)
+
+    build_entry_parser(subparsers)
 
     subparsers.add_parser("wizard", help="Twins quickstart wizard (run `arga wizard --help` for subcommands)")
 

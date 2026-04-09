@@ -8,14 +8,15 @@ from arga_cli import main
 def test_test_url_command_prints_run_id(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
 
-    def fake_start(self, *, url: str, prompt: str, email: str | None = None, password: str | None = None):
-        assert url == "https://demo-app.com"
-        assert prompt == "test login flow"
-        assert email is None
-        assert password is None
+    def fake_start(self, **kwargs):
+        assert kwargs["url"] == "https://demo-app.com"
+        assert kwargs["prompt"] == "test login flow"
+        assert kwargs.get("email") is None
+        assert kwargs.get("password") is None
         return {"run_id": "run_3421", "status": "queued", "session_id": "session_1"}
 
     monkeypatch.setattr(main.ApiClient, "start_url_validation", fake_start)
+    monkeypatch.setattr(main.ApiClient, "get_me", lambda self: {"billing_plan": "free"})
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
 
     args = main.build_parser().parse_args(
@@ -33,10 +34,11 @@ def test_test_url_command_prints_run_id(monkeypatch, capsys) -> None:
 def test_test_url_json_flag(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
 
-    def fake_start(self, *, url: str, prompt: str, email: str | None = None, password: str | None = None):
+    def fake_start(self, **kwargs):
         return {"run_id": "run_3421", "status": "queued", "session_id": "session_1"}
 
     monkeypatch.setattr(main.ApiClient, "start_url_validation", fake_start)
+    monkeypatch.setattr(main.ApiClient, "get_me", lambda self: {"billing_plan": "free"})
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
 
     args = main.build_parser().parse_args(

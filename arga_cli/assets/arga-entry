@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROG="arga-entry"
+DEFAULT_CERT="/arga/ca.crt"
+
+log() { printf '[%s] %s\n' "$PROG" "$*" >&2; }
+
+usage() {
+    cat >&2 <<EOF
+Usage: $PROG <command> [options]
+
+Install an Arga CA certificate into the system trust store so that
+TLS interception works with any language or runtime.
+
+Commands:
+  run   [--cert PATH] -- <command...>   Install CA, then exec command
+  install-ca [--cert PATH]              Install CA into system trust store
+  check      [--cert PATH]              Verify CA is installed
+
+Options:
+  --cert PATH   Path to CA certificate (default: $DEFAULT_CERT)
+  --help        Show this help
+EOF
+    exit "${1:-0}"
+}
+
+# ---------------------------------------------------------------------------
+# Detect distro family and install the CA cert
+# ---------------------------------------------------------------------------
+_install_ca() {
+    local cert_file="$1"
+
+    if [ ! -f "$cert_file" ]; then
+        log "ERROR: CA certificate not found at $cert_file"
+        return 1
+    fi
+
+    # Debian / Ubuntu / Alpine
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+        local target_dir="/usr/local/share/ca-certificates"
+        mkdir -p "$target_dir"
+        cp "$cert_file" "$target_dir/arga-ca.crt"
+        update-ca-certificates 2>/dev/null
+        log "CA installed via update-ca-certificates"
+        return 0
+    fi
+
+    # RHEL / Rocky / Fedora
+    if command -v update-ca-trust >/dev/null 2>&1; then
+        local target_dir="/etc/pki/ca-trust/source/anchors"
+        mkdir -p "$target_dir"
+        cp "$cert_file" "$target_dir/arga-ca.crt"
+        update-ca-trust extract 2>/dev/null
+        log "CA installed via update-ca-trust"
+        return 0
+    fi
+
+    # Generic fallback: append to system bundle
+    if [ -d /etc/ssl/certs ]; then
+        cp "$cert_file" /etc/ssl/certs/arga-ca.crt
+        if command -v c_rehash >/dev/null 2>&1; then
+            c_rehash /etc/ssl/certs >/dev/null 2>&1 || true
+        fi
+        log "CA installed to /etc/ssl/certs (fallback)"
+        return 0
+    fi
+
+    log "WARNING: could not detect cert store; CA not installed at system level"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Check that the CA cert is present in the system store
+# ---------------------------------------------------------------------------
+_check_ca() {
+    local cert_file="$1"
+
+    if [ ! -f "$cert_file" ]; then
+        log "FAIL: CA certificate file not found at $cert_file"
+        return 1
+    fi
+    log "OK: CA certificate file exists at $cert_file"
+
+    local installed=0
+    for path in \
+        /usr/local/share/ca-certificates/arga-ca.crt \
+        /etc/pki/ca-trust/source/anchors/arga-ca.crt \
+        /etc/ssl/certs/arga-ca.crt; do
+        if [ -f "$path" ]; then
+            log "OK: CA installed at $path"
+            installed=1
+        fi
+    done
+
+    if [ "$installed" -eq 0 ]; then
+        log "WARN: CA not found in any system trust store location"
+        return 1
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Parse --cert flag from arguments, return remaining args
+# ---------------------------------------------------------------------------
+CERT_PATH="$DEFAULT_CERT"
+
+_parse_cert_flag() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --cert)
+                [ $# -ge 2 ] || { log "ERROR: --cert requires a path"; exit 1; }
+                CERT_PATH="$2"
+                shift 2
+                ;;
+            --help|-h)
+                usage 0
+                ;;
+            --)
+                shift
+                REMAINING_ARGS=("$@")
+                return
+                ;;
+            *)
+                REMAINING_ARGS=("$@")
+                return
+                ;;
+        esac
+    done
+    REMAINING_ARGS=()
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+[ $# -ge 1 ] || usage 1
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    run)
+        REMAINING_ARGS=()
+        _parse_cert_flag "$@"
+        _install_ca "$CERT_PATH"
+        # Ensure Node.js uses the system OpenSSL CA store
+        export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--use-openssl-ca"
+        if [ ${#REMAINING_ARGS[@]} -eq 0 ]; then
+            log "ERROR: no command specified after --"
+            exit 1
+        fi
+        log "exec: ${REMAINING_ARGS[*]}"
+        exec "${REMAINING_ARGS[@]}"
+        ;;
+    install-ca)
+        _parse_cert_flag "$@"
+        _install_ca "$CERT_PATH"
+        ;;
+    check)
+        _parse_cert_flag "$@"
+        _check_ca "$CERT_PATH"
+        ;;
+    --help|-h)
+        usage 0
+        ;;
+    *)
+        log "ERROR: unknown command '$COMMAND'"
+        usage 1
+        ;;
+esac
