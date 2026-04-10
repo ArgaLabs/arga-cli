@@ -25,6 +25,7 @@ WIZARD_SESSION_FILE = ".arga-session.json"
 WIZARD_SESSION_PATH = Path(WIZARD_SESSION_FILE)
 POLL_INTERVAL_SECONDS = 2.0
 POLL_TIMEOUT_SECONDS = 600.0
+URL_VALIDATION_START_TIMEOUT_SECONDS = 60.0
 SKIP_TRAILER = "[skip arga]"
 
 
@@ -102,6 +103,7 @@ class ApiClient:
             f"{self._api_url}/validate/url-run",
             json=payload,
             headers=self._auth_headers(),
+            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
         )
         return self._parse_json(response, "Failed to start URL validation")
 
