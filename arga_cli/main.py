@@ -47,7 +47,7 @@ class ApiClient:
     def __init__(self, api_url: str, api_key: str | None = None) -> None:
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
-        self._client = httpx.Client(timeout=10.0)
+        self._client = httpx.Client(timeout=60.0)
 
     def close(self) -> None:
         self._client.close()
@@ -237,9 +237,18 @@ class ApiClient:
             return payload
 
         detail = payload.get("detail") if isinstance(payload, dict) else None
+        message = str(detail) if detail else fallback
         if response.status_code == 401:
             raise NotAuthenticatedError("Error: Not authenticated. Run `arga login`.")
-        raise CliError(str(detail or fallback))
+        if response.status_code == 403:
+            message += " Your plan may not support this feature. Check with `arga whoami`."
+        elif response.status_code == 404:
+            message += " Check that your plan supports this feature with `arga whoami`."
+        elif response.status_code == 429:
+            message += " Rate limit exceeded. Please wait and try again."
+        elif response.status_code >= 500:
+            message += " Server error. Please try again later."
+        raise CliError(message)
 
 
 def load_config() -> dict[str, str]:
@@ -379,6 +388,8 @@ def run_whoami(args: argparse.Namespace) -> int:
 
     print(f"Logged in as: {payload.get('github_login', 'unknown')}")
     print(f"Workspace: {payload.get('workspace', 'Unknown')}")
+    print(f"Email: {payload.get('email', 'not set')}")
+    print(f"Email verified: {payload.get('email_verified', False)}")
 
     billing_plan = payload.get("billing_plan", "free")
     print(f"Plan: {billing_plan}")
@@ -427,8 +438,7 @@ def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
     # Free tier — locked to 10 minutes
     if requested_ttl is not None and requested_ttl != FREE_TTL:
         raise CliError(
-            f"Free plan runs are limited to {FREE_TTL} minutes. "
-            f"Upgrade to Team for custom TTL (up to 480 minutes)."
+            f"Free plan runs are limited to {FREE_TTL} minutes. Upgrade to Team for custom TTL (up to 480 minutes)."
         )
     return FREE_TTL
 
@@ -468,7 +478,9 @@ def run_validate_pr(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        payload = client.start_pr_validation(repo=args.repo, pr_number=args.pr, context_notes=getattr(args, "context_notes", None))
+        payload = client.start_pr_validation(
+            repo=args.repo, pr_number=args.pr, context_notes=getattr(args, "context_notes", None)
+        )
     finally:
         client.close()
 
@@ -630,14 +642,15 @@ def _scan_help_text() -> str:
         "usage: arga scan <url> [--budget 200]\n"
         "       arga scan status <run_id>\n"
         "       arga scan report <run_id>\n\n"
-        "Start or inspect Arga agent runs."
+        "Start or inspect Arga agent runs.\n\n"
+        "Note: scan requires a Team or Paid plan. Check your plan with `arga whoami`."
     )
 
 
 def _build_scan_start_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="arga scan",
-        description="Start an Arga agent run.",
+        description="Start an Arga agent run. Requires a Team or Paid plan.",
         allow_abbrev=False,
     )
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -1092,7 +1105,10 @@ def run_validate_cli(argv: list[str]) -> int:
 def _parse_git_wrapper_args(command: str, argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(
         prog=f"arga {command}",
-        description=f"Wrap `git {command}` with optional Arga-specific behavior.",
+        description=(
+            f"Wrap `git {command}` with optional Arga-specific behavior. "
+            f"All unrecognized flags are forwarded to `git {command}`."
+        ),
         allow_abbrev=False,
     )
     parser.add_argument(
@@ -1488,7 +1504,9 @@ def build_parser() -> argparse.ArgumentParser:
     validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
-    validate_pr_parser.add_argument("--context-notes", default=None, help="Additional instructions or context for the validation")
+    validate_pr_parser.add_argument(
+        "--context-notes", default=None, help="Additional instructions or context for the validation"
+    )
     validate_pr_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     validate_pr_parser.set_defaults(func=run_validate_pr)
 
