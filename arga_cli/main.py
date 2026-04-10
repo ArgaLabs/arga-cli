@@ -124,22 +124,6 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to start PR validation")
 
-    def start_redteam_scan(self, *, url: str, action_budget: int, focus: str | None = None) -> dict[str, Any]:
-        response = self._client.post(
-            f"{self._api_url}/validate/agent-run",
-            json={"url": url, "action_budget": action_budget, "focus": focus},
-            headers=self._auth_headers(),
-        )
-        return self._parse_json(response, "Failed to start agent run")
-
-    def approve_redteam_scan(self, run_id: str) -> dict[str, Any]:
-        response = self._client.post(
-            f"{self._api_url}/redteam/{run_id}/approve",
-            json={},
-            headers=self._auth_headers(),
-        )
-        return self._parse_json(response, "Failed to approve agent run")
-
     def get_run(self, run_id: str) -> dict[str, Any]:
         response = self._client.get(
             f"{self._api_url}/runs/{run_id}",
@@ -153,13 +137,6 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to load run logs")
-
-    def get_redteam_report(self, run_id: str) -> dict[str, Any]:
-        response = self._client.get(
-            f"{self._api_url}/redteam/{run_id}/report",
-            headers=self._auth_headers(),
-        )
-        return self._parse_json(response, "Failed to load agent run report")
 
     def list_pr_validation_runs(
         self,
@@ -642,150 +619,6 @@ def run_mcp_install(args: argparse.Namespace) -> int:
         print("\nInstall Arga MCP manually by adding the generated config to your IDE.")
         return 1
     return 1 if failures else 0
-
-
-def _scan_help_text() -> str:
-    return (
-        "usage: arga scan <url> [--budget 200]\n"
-        "       arga scan status <run_id>\n"
-        "       arga scan report <run_id>\n\n"
-        "Start or inspect Arga agent runs.\n\n"
-        "Note: scan requires a Team or Paid plan. Check your plan with `arga whoami`."
-    )
-
-
-def _build_scan_start_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="arga scan",
-        description="Start an Arga agent run. Requires a Team or Paid plan.",
-        allow_abbrev=False,
-    )
-    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    parser.add_argument("url", help="Public application URL to explore")
-    parser.add_argument("--budget", type=int, default=200, help="Total action budget for the scan")
-    return parser
-
-
-def _build_scan_status_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="arga scan status",
-        description="Check the status of an Arga agent run.",
-        allow_abbrev=False,
-    )
-    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    parser.add_argument("run_id", help="App scan run ID")
-    return parser
-
-
-def _build_scan_report_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="arga scan report",
-        description="View the final report for an Arga agent run.",
-        allow_abbrev=False,
-    )
-    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    parser.add_argument("run_id", help="App scan run ID")
-    return parser
-
-
-def _status_from_run(run: dict[str, Any]) -> str:
-    return str(run.get("status") or "unknown")
-
-
-def _wait_for_scan_approval(client: ApiClient, run_id: str) -> dict[str, Any]:
-    deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
-    last_run: dict[str, Any] = {"id": run_id, "status": "planning"}
-    while time.monotonic() < deadline:
-        run = client.get_run(run_id)
-        last_run = run
-        status = _status_from_run(run)
-        if status in {"queued", "running", "completed", "failed", "cancelled"}:
-            return run
-
-        if status in {"planning", "awaiting_approval"}:
-            try:
-                approval = client.approve_redteam_scan(run_id)
-                run["status"] = approval.get("status", run.get("status"))
-                return run
-            except CliError as exc:
-                if str(exc) != "Scan plan is not ready yet":
-                    raise
-
-        time.sleep(POLL_INTERVAL_SECONDS)
-
-    raise CliError(f"Timed out waiting for the scan plan to be ready for run {last_run.get('id', run_id)}.")
-
-
-def _print_scan_summary(run_id: str, run: dict[str, Any]) -> None:
-    report = run.get("redteam_report_json")
-    anomaly_count = len(report.get("anomalies") or []) if isinstance(report, dict) else 0
-    print(f"Run ID: {run_id}")
-    print(f"Status: {_status_from_run(run)}")
-    print(f"URL: {run.get('frontend_url') or run.get('pr_url') or 'unknown'}")
-    print(f"Mode: {run.get('mode') or 'unknown'}")
-    print(f"Anomalies: {anomaly_count}")
-
-
-def run_scan_start(args: argparse.Namespace) -> int:
-    if args.budget <= 0:
-        raise CliError("Budget must be a positive integer.")
-
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
-    try:
-        payload = client.start_redteam_scan(url=args.url, action_budget=args.budget)
-        run_id = str(payload.get("run_id") or "")
-        if not run_id:
-            raise CliError("Agent run started but no run ID was returned.")
-        run = _wait_for_scan_approval(client, run_id)
-    finally:
-        client.close()
-
-    print("Starting agent run...\n")
-    print(f"URL: {args.url}")
-    print(f"Budget: {args.budget}")
-    print(f"Run ID: {run_id}")
-    print(f"Status: {_status_from_run(run)}")
-    return 0
-
-
-def run_scan_status(args: argparse.Namespace) -> int:
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
-    try:
-        run = client.get_run(args.run_id)
-    finally:
-        client.close()
-
-    _print_scan_summary(args.run_id, run)
-    return 0
-
-
-def run_scan_report(args: argparse.Namespace) -> int:
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
-    try:
-        report = client.get_redteam_report(args.run_id)
-    finally:
-        client.close()
-
-    if not report:
-        raise CliError("Scan report is not ready yet.")
-
-    print(json.dumps(report, indent=2))
-    return 0
-
-
-def run_scan_cli(argv: list[str]) -> int:
-    if not argv or argv[0] in {"-h", "--help"}:
-        print(_scan_help_text())
-        return 0
-
-    if argv[0] == "status":
-        return run_scan_status(_build_scan_status_parser().parse_args(argv[1:]))
-    if argv[0] == "report":
-        return run_scan_report(_build_scan_report_parser().parse_args(argv[1:]))
-    return run_scan_start(_build_scan_start_parser().parse_args(argv))
 
 
 def _format_timestamp(value: str | None) -> str:
@@ -1576,7 +1409,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("commit", help="Wrap git commit and optionally mark it to skip Arga validation")
     subparsers.add_parser("push", help="Wrap git push and verify skip state when requested")
-    subparsers.add_parser("scan", help="Start an agent run or inspect a scan run")
     return parser
 
 
@@ -1588,8 +1420,6 @@ def main() -> None:
             exit_code = run_push_cli(sys.argv[2:])
         elif len(sys.argv) > 1 and sys.argv[1] == "validate":
             exit_code = run_validate_cli(sys.argv[2:])
-        elif len(sys.argv) > 1 and sys.argv[1] == "scan":
-            exit_code = run_scan_cli(sys.argv[2:])
         elif len(sys.argv) > 1 and sys.argv[1] == "wizard":
             exit_code = run_wizard_cli(sys.argv[2:])
         else:
