@@ -83,15 +83,15 @@ class ApiClient:
         self,
         *,
         url: str,
-        prompt: str,
+        prompt: str | None = None,
         email: str | None = None,
         password: str | None = None,
         ttl_minutes: int | None = None,
+        scenario_id: str | None = None,
     ) -> dict[str, str]:
-        payload: dict[str, object] = {
-            "url": url,
-            "prompt": prompt,
-        }
+        payload: dict[str, object] = {"url": url}
+        if prompt is not None:
+            payload["prompt"] = prompt
         if email or password:
             payload["credentials"] = {
                 "email": email or "",
@@ -99,6 +99,8 @@ class ApiClient:
             }
         if ttl_minutes is not None:
             payload["ttl_minutes"] = ttl_minutes
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
         response = self._client.post(
             f"{self._api_url}/validate/url-run",
             json=payload,
@@ -106,6 +108,53 @@ class ApiClient:
             timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
         )
         return self._parse_json(response, "Failed to start URL validation")
+
+    def list_scenarios(self, *, include_presets: bool = False) -> list[dict[str, Any]]:
+        params: dict[str, str] = {}
+        if include_presets:
+            params["include_presets"] = "true"
+        response = self._client.get(
+            f"{self._api_url}/scenarios",
+            params=params,
+            headers=self._auth_headers(),
+        )
+        data = self._parse_json(response, "Failed to list scenarios")
+        if not isinstance(data, list):
+            raise CliError("Unexpected response from /scenarios")
+        return data
+
+    def create_scenario(
+        self,
+        *,
+        name: str,
+        prompt: str | None = None,
+        description: str | None = None,
+        twins: list[str] | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"name": name}
+        if prompt is not None:
+            payload["prompt"] = prompt
+        if description is not None:
+            payload["description"] = description
+        if twins:
+            payload["twins"] = twins
+        if tags:
+            payload["tags"] = tags
+        response = self._client.post(
+            f"{self._api_url}/scenarios",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
+        )
+        return self._parse_json(response, "Failed to create scenario")
+
+    def delete_scenario(self, scenario_id: str) -> dict[str, str]:
+        response = self._client.delete(
+            f"{self._api_url}/scenarios/{scenario_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to delete scenario")
 
     def start_pr_validation(
         self,
@@ -426,6 +475,10 @@ def run_test_url(args: argparse.Namespace) -> int:
     if bool(args.email) != bool(args.password):
         raise CliError("Both --email and --password must be provided together.")
 
+    scenario_id = getattr(args, "scenario", None)
+    if not args.prompt and not scenario_id:
+        raise CliError("Either --prompt or --scenario must be provided.")
+
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
@@ -436,6 +489,7 @@ def run_test_url(args: argparse.Namespace) -> int:
             email=args.email,
             password=args.password,
             ttl_minutes=ttl_minutes,
+            scenario_id=scenario_id,
         )
     finally:
         client.close()
@@ -446,7 +500,10 @@ def run_test_url(args: argparse.Namespace) -> int:
 
     print("Starting validation...\n")
     print(f"URL: {args.url}")
-    print(f"Prompt: {args.prompt}")
+    if args.prompt:
+        print(f"Prompt: {args.prompt}")
+    if scenario_id:
+        print(f"Scenario: {scenario_id}")
     print(f"TTL: {ttl_minutes} minutes\n")
     print(f"Run ID: {payload.get('run_id', 'unknown')}")
     print(f"Status: {payload.get('status', 'unknown')}")
@@ -473,6 +530,77 @@ def run_validate_pr(args: argparse.Namespace) -> int:
     print("Validation run started.")
     print(f"Run ID: {payload.get('run_id', 'unknown')}")
     print(f"Status: {payload.get('status', 'unknown')}")
+    return 0
+
+
+def run_scenarios_list(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenarios = client.list_scenarios(include_presets=getattr(args, "include_presets", False))
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(scenarios, indent=2))
+        return 0
+
+    if not scenarios:
+        print("No scenarios found. Create one with `arga scenarios create`.")
+        return 0
+
+    for s in scenarios:
+        marker = " (preset)" if s.get("is_preset") else ""
+        twins = ", ".join(s.get("twins") or []) or "-"
+        tags = ", ".join(s.get("tags") or []) or "-"
+        print(f"{s.get('id')}  {s.get('name')}{marker}")
+        if s.get("description"):
+            print(f"  description: {s['description']}")
+        print(f"  twins: {twins}")
+        print(f"  tags: {tags}")
+        print()
+    return 0
+
+
+def run_scenarios_create(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenario = client.create_scenario(
+            name=args.name,
+            prompt=args.prompt,
+            description=getattr(args, "description", None),
+            twins=getattr(args, "twin", None),
+            tags=getattr(args, "tag", None),
+        )
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(scenario, indent=2))
+        return 0
+
+    print("Scenario created.")
+    print(f"  id: {scenario.get('id')}")
+    print(f"  name: {scenario.get('name')}")
+    if scenario.get("twins"):
+        print(f"  twins: {', '.join(scenario['twins'])}")
+    return 0
+
+
+def run_scenarios_delete(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        result = client.delete_scenario(args.scenario_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(result))
+        return 0
+
+    print(f"Deleted scenario {args.scenario_id}.")
     return 0
 
 
@@ -1371,7 +1499,16 @@ def build_parser() -> argparse.ArgumentParser:
     test_url_parser = test_subparsers.add_parser("url", help="Run a browser validation against a deployed URL")
     test_url_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     test_url_parser.add_argument("--url", required=True, help="Deployed application URL")
-    test_url_parser.add_argument("--prompt", required=True, help="Natural language instructions for the agent")
+    test_url_parser.add_argument(
+        "--prompt",
+        default=None,
+        help="Natural language instructions for the agent (optional when --scenario is provided)",
+    )
+    test_url_parser.add_argument(
+        "--scenario",
+        default=None,
+        help="Scenario ID to seed twins from (obtain via `arga scenarios list` or the web app)",
+    )
     test_url_parser.add_argument("--email", help="Optional login email")
     test_url_parser.add_argument("--password", help="Optional login password")
     test_url_parser.add_argument(
@@ -1382,6 +1519,49 @@ def build_parser() -> argparse.ArgumentParser:
     )
     test_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     test_url_parser.set_defaults(func=run_test_url)
+
+    scenarios_parser = subparsers.add_parser("scenarios", help="Manage twin seed scenarios")
+    scenarios_subparsers = scenarios_parser.add_subparsers(dest="scenarios_command", required=True)
+
+    scenarios_list_parser = scenarios_subparsers.add_parser("list", help="List your scenarios")
+    scenarios_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_list_parser.add_argument(
+        "--include-presets",
+        action="store_true",
+        default=False,
+        help="Also include built-in preset scenarios",
+    )
+    scenarios_list_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_list_parser.set_defaults(func=run_scenarios_list)
+
+    scenarios_create_parser = scenarios_subparsers.add_parser(
+        "create", help="Create a scenario from a natural-language prompt"
+    )
+    scenarios_create_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_create_parser.add_argument("--name", required=True, help="Scenario name")
+    scenarios_create_parser.add_argument(
+        "--prompt",
+        required=True,
+        help="Natural-language description of the desired twin state (LLM generates seed_config)",
+    )
+    scenarios_create_parser.add_argument("--description", default=None, help="Optional description")
+    scenarios_create_parser.add_argument(
+        "--twin",
+        action="append",
+        default=None,
+        help="Restrict to specific twin(s) (repeatable). Inferred from prompt if omitted.",
+    )
+    scenarios_create_parser.add_argument(
+        "--tag", action="append", default=None, help="Tag the scenario (repeatable)"
+    )
+    scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_create_parser.set_defaults(func=run_scenarios_create)
+
+    scenarios_delete_parser = scenarios_subparsers.add_parser("delete", help="Delete a scenario")
+    scenarios_delete_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_delete_parser.add_argument("scenario_id", help="Scenario ID to delete")
+    scenarios_delete_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_delete_parser.set_defaults(func=run_scenarios_delete)
 
     validate_parser = subparsers.add_parser("validate", help="Start PR or URL validation runs")
     validate_subparsers = validate_parser.add_subparsers(dest="validate_command", required=True)
