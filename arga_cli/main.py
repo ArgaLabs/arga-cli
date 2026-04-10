@@ -25,6 +25,7 @@ WIZARD_SESSION_FILE = ".arga-session.json"
 WIZARD_SESSION_PATH = Path(WIZARD_SESSION_FILE)
 POLL_INTERVAL_SECONDS = 2.0
 POLL_TIMEOUT_SECONDS = 600.0
+URL_VALIDATION_START_TIMEOUT_SECONDS = 60.0
 SKIP_TRAILER = "[skip arga]"
 
 
@@ -102,6 +103,7 @@ class ApiClient:
             f"{self._api_url}/validate/url-run",
             json=payload,
             headers=self._auth_headers(),
+            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
         )
         return self._parse_json(response, "Failed to start URL validation")
 
@@ -493,6 +495,11 @@ def _build_validate_pr_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     parser.add_argument("--pr", required=True, type=int, help="Pull request number")
+    parser.add_argument(
+        "--context-notes",
+        help="Optional notes to focus the validation on specific changes",
+    )
+    parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     return parser
 
 
@@ -1271,22 +1278,26 @@ def run_wizard_cli(argv: list[str]) -> int:
 
     command = argv[0]
 
-    if command == "init":
-        return run_wizard_init(_build_wizard_init_parser().parse_args(argv[1:]))
-    if command == "status":
-        return run_wizard_status(_build_wizard_session_parser("arga wizard status").parse_args(argv[1:]))
-    if command == "reset":
-        return run_wizard_reset(_build_wizard_session_parser("arga wizard reset").parse_args(argv[1:]))
-    if command == "extend":
-        return run_wizard_extend(_build_wizard_session_parser("arga wizard extend").parse_args(argv[1:]))
-    if command == "teardown":
-        return run_wizard_teardown(_build_wizard_session_parser("arga wizard teardown").parse_args(argv[1:]))
-    if command == "env":
-        return run_wizard_env(_build_wizard_init_parser().parse_args(argv[1:]))
+    try:
+        if command == "init":
+            return run_wizard_init(_build_wizard_init_parser().parse_args(argv[1:]))
+        if command == "status":
+            return run_wizard_status(_build_wizard_session_parser("arga wizard status").parse_args(argv[1:]))
+        if command == "reset":
+            return run_wizard_reset(_build_wizard_session_parser("arga wizard reset").parse_args(argv[1:]))
+        if command == "extend":
+            return run_wizard_extend(_build_wizard_session_parser("arga wizard extend").parse_args(argv[1:]))
+        if command == "teardown":
+            return run_wizard_teardown(_build_wizard_session_parser("arga wizard teardown").parse_args(argv[1:]))
+        if command == "env":
+            return run_wizard_env(_build_wizard_init_parser().parse_args(argv[1:]))
 
-    # No recognized subcommand — treat everything as flags for `init`
-    if command.startswith("-"):
-        return run_wizard_init(_build_wizard_init_parser().parse_args(argv))
+        # No recognized subcommand — treat everything as flags for `init`
+        if command.startswith("-"):
+            return run_wizard_init(_build_wizard_init_parser().parse_args(argv))
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     raise CliError(f"Unknown wizard subcommand: {command}")
 
