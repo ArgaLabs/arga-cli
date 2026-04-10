@@ -11,7 +11,6 @@
 - Starts URL validation runs from the terminal.
 - Starts pull request validation runs from the terminal.
 - Wraps `git commit` and `git push` with Arga skip-validation helpers.
-- Starts and inspects Arga app scans.
 
 ## Installation 
 
@@ -90,14 +89,6 @@ arga validate config arga-labs/validation-server
 arga validate config set arga-labs/validation-server --trigger branch --branch main --comments on
 ```
 
-Start an app scan and inspect it later:
-
-```bash
-arga scan https://demo-app.com --budget 200
-arga scan status <run_id>
-arga scan report <run_id>
-```
-
 List and inspect recent validation runs:
 
 ```bash
@@ -150,19 +141,6 @@ arga test url \
 ```
 
 Both `--email` and `--password` must be supplied together.
-
-### App Scans
-
-```bash
-arga scan https://demo-app.com --budget 200
-arga scan status <run_id>
-arga scan report <run_id>
-```
-
-- `arga scan <url>` starts an app scan, waits for the generated scan plan to be ready, and auto-approves it so execution can begin.
-- `--budget` controls the red-team action budget and defaults to `200`.
-- `arga scan status <run_id>` prints the current run status and anomaly count.
-- `arga scan report <run_id>` prints the final JSON report once the scan has completed.
 
 ### Validation Runs
 
