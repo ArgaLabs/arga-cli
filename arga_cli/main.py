@@ -739,6 +739,40 @@ def _print_worker_logs(worker_logs: list[dict[str, Any]]) -> None:
             print()
 
 
+def _print_timeline_events(timeline_events: list[dict[str, Any]], *, limit: int = 50) -> None:
+    print("Timeline:")
+    if not timeline_events:
+        print("None")
+        return
+
+    total = len(timeline_events)
+    events = timeline_events[-limit:] if total > limit else timeline_events
+    if total > limit:
+        print(f"(showing last {len(events)} of {total} events)")
+
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            continue
+        timestamp = _format_timestamp(event.get("timestamp") or event.get("created_at"))
+        event_type = str(event.get("type") or event.get("event_type") or "").strip()
+        header_parts = [part for part in (timestamp, event_type) if part and part != "-"]
+        header = " | ".join(header_parts) if header_parts else "event"
+        print(header)
+
+        message = str(event.get("message") or "").strip()
+        if message:
+            print(message)
+
+        details = event.get("details")
+        if isinstance(details, dict) and details:
+            error_message = str(details.get("error_message") or details.get("error") or "").strip()
+            if error_message and error_message != message:
+                print(f"Error: {error_message}")
+
+        if index < len(events) - 1:
+            print()
+
+
 def _print_runtime_logs(runtime_logs: list[dict[str, Any]]) -> None:
     print("Runtime Logs:")
     if not runtime_logs:
@@ -831,10 +865,18 @@ def _print_run_logs(payload: dict[str, Any], fallback_run_id: str) -> None:
     if isinstance(timeline_events, list):
         print(f"Timeline Events: {len(timeline_events)}")
 
+    worker_logs_list = worker_logs if isinstance(worker_logs, list) else []
+    runtime_logs_list = runtime_logs if isinstance(runtime_logs, list) else []
+    timeline_events_list = timeline_events if isinstance(timeline_events, list) else []
+
     print()
-    _print_worker_logs(worker_logs if isinstance(worker_logs, list) else [])
+    _print_worker_logs(worker_logs_list)
     print()
-    _print_runtime_logs(runtime_logs if isinstance(runtime_logs, list) else [])
+    _print_runtime_logs(runtime_logs_list)
+
+    if not worker_logs_list and not runtime_logs_list and timeline_events_list:
+        print()
+        _print_timeline_events(timeline_events_list)
 
     if isinstance(warnings, list) and warnings:
         print()
