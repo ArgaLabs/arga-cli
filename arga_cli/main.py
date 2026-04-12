@@ -88,6 +88,8 @@ class ApiClient:
         password: str | None = None,
         ttl_minutes: int | None = None,
         scenario_id: str | None = None,
+        provision_id: str | None = None,
+        twins: list[str] | None = None,
     ) -> dict[str, str]:
         payload: dict[str, object] = {"url": url}
         if prompt is not None:
@@ -101,6 +103,10 @@ class ApiClient:
             payload["ttl_minutes"] = ttl_minutes
         if scenario_id:
             payload["scenario_id"] = scenario_id
+        if provision_id:
+            payload["provision_id"] = provision_id
+        if twins:
+            payload["twins"] = twins
         response = self._client.post(
             f"{self._api_url}/validate/url-run",
             json=payload,
@@ -471,6 +477,25 @@ def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
     return FREE_TTL
 
 
+def _print_twin_env_vars(status: dict) -> None:
+    """Print twin URLs and env vars so the user can configure their app."""
+    from arga_cli.wizard.provision import with_proxy_token
+
+    proxy_token = status.get("proxy_token")
+    print("\nTwin environment variables — update your app's config to point at these:\n")
+    for name, info in status.get("twins", {}).items():
+        label = info.get("label", name)
+        base_url = info.get("base_url", "")
+        if proxy_token and base_url:
+            base_url = with_proxy_token(base_url, proxy_token)
+        print(f"  {label}:")
+        print(f"    Base URL: {base_url}")
+        env_vars = info.get("env_vars", {})
+        for key, val in env_vars.items():
+            print(f"    {key}={val}")
+        print()
+
+
 def run_test_url(args: argparse.Namespace) -> int:
     if bool(args.email) != bool(args.password):
         raise CliError("Both --email and --password must be provided together.")
@@ -479,10 +504,32 @@ def run_test_url(args: argparse.Namespace) -> int:
     if not args.prompt and not scenario_id:
         raise CliError("Either --prompt or --scenario must be provided.")
 
+    twins_arg: list[str] | None = None
+    raw_twins = getattr(args, "twins", None)
+    if raw_twins:
+        twins_arg = [t.strip() for t in raw_twins.split(",") if t.strip()]
+
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
         ttl_minutes = _resolve_ttl(client, getattr(args, "ttl", None))
+
+        provision_id: str | None = None
+        if twins_arg:
+            from arga_cli.wizard.provision import provision_twins
+
+            status = provision_twins(client, twins_arg, ttl_minutes=ttl_minutes or 30)
+            provision_id = status.get("run_id")
+            _print_twin_env_vars(status)
+
+            print("Deploy your app with the environment variables above, then press Enter to start the validation run.")
+            print("Press Ctrl+C to cancel.\n")
+            try:
+                input()
+            except KeyboardInterrupt:
+                print("\nCancelled.")
+                return 1
+
         payload = client.start_url_validation(
             url=args.url,
             prompt=args.prompt,
@@ -490,6 +537,8 @@ def run_test_url(args: argparse.Namespace) -> int:
             password=args.password,
             ttl_minutes=ttl_minutes,
             scenario_id=scenario_id,
+            provision_id=provision_id,
+            twins=twins_arg if not provision_id else None,
         )
     finally:
         client.close()
@@ -1509,6 +1558,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Scenario ID to seed twins from (obtain via `arga scenarios list` or the web app)",
     )
+    test_url_parser.add_argument(
+        "--twins",
+        default=None,
+        help="Comma-separated list of digital twins to provision before the run (e.g. slack,stripe). "
+        "Twins are provisioned first, then you deploy your app against them before the validation starts.",
+    )
     test_url_parser.add_argument("--email", help="Optional login email")
     test_url_parser.add_argument("--password", help="Optional login password")
     test_url_parser.add_argument(
@@ -1551,9 +1606,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Restrict to specific twin(s) (repeatable). Inferred from prompt if omitted.",
     )
-    scenarios_create_parser.add_argument(
-        "--tag", action="append", default=None, help="Tag the scenario (repeatable)"
-    )
+    scenarios_create_parser.add_argument("--tag", action="append", default=None, help="Tag the scenario (repeatable)")
     scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
     scenarios_create_parser.set_defaults(func=run_scenarios_create)
 
