@@ -509,6 +509,11 @@ def run_test_url(args: argparse.Namespace) -> int:
     if raw_twins:
         twins_arg = [t.strip() for t in raw_twins.split(",") if t.strip()]
 
+    if not args.url and not twins_arg:
+        raise CliError("--url is required (or use --twins to provision twins first).")
+
+    url: str = args.url or ""
+
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
@@ -522,16 +527,30 @@ def run_test_url(args: argparse.Namespace) -> int:
             provision_id = status.get("run_id")
             _print_twin_env_vars(status)
 
-            print("Deploy your app with the environment variables above, then press Enter to start the validation run.")
-            print("Press Ctrl+C to cancel.\n")
-            try:
-                input()
-            except KeyboardInterrupt:
-                print("\nCancelled.")
-                return 1
+            if not url:
+                print("Deploy your app with the environment variables above.")
+                print("Press Ctrl+C to cancel.\n")
+                try:
+                    url = input("Enter your staging URL: ").strip()
+                except KeyboardInterrupt:
+                    print("\nCancelled.")
+                    return 1
+                if not url:
+                    raise CliError("A URL is required to start the validation run.")
+                print()
+            else:
+                print(
+                    "Deploy your app with the environment variables above, then press Enter to start the validation run."
+                )
+                print("Press Ctrl+C to cancel.\n")
+                try:
+                    input()
+                except KeyboardInterrupt:
+                    print("\nCancelled.")
+                    return 1
 
         payload = client.start_url_validation(
-            url=args.url,
+            url=url,
             prompt=args.prompt,
             email=args.email,
             password=args.password,
@@ -548,7 +567,7 @@ def run_test_url(args: argparse.Namespace) -> int:
         return 0
 
     print("Starting validation...\n")
-    print(f"URL: {args.url}")
+    print(f"URL: {url}")
     if args.prompt:
         print(f"Prompt: {args.prompt}")
     if scenario_id:
@@ -1547,7 +1566,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     test_url_parser = test_subparsers.add_parser("url", help="Run a browser validation against a deployed URL")
     test_url_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    test_url_parser.add_argument("--url", required=True, help="Deployed application URL")
+    test_url_parser.add_argument(
+        "--url", default=None, help="Deployed application URL (prompted after twin provisioning when --twins is used)"
+    )
     test_url_parser.add_argument(
         "--prompt",
         default=None,
