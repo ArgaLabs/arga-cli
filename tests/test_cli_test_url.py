@@ -44,10 +44,13 @@ def test_test_url_command_prints_run_id(monkeypatch, capsys) -> None:
         self,
         *,
         url: str,
-        prompt: str,
+        prompt: str | None = None,
         email: str | None = None,
         password: str | None = None,
         ttl_minutes: int | None = None,
+        scenario_id: str | None = None,
+        provision_id: str | None = None,
+        twins: list[str] | None = None,
     ):
         assert url == "https://demo-app.com"
         assert prompt == "test login flow"
@@ -79,10 +82,13 @@ def test_test_url_json_flag(monkeypatch, capsys) -> None:
         self,
         *,
         url: str,
-        prompt: str,
+        prompt: str | None = None,
         email: str | None = None,
         password: str | None = None,
         ttl_minutes: int | None = None,
+        scenario_id: str | None = None,
+        provision_id: str | None = None,
+        twins: list[str] | None = None,
     ):
         assert ttl_minutes == 10
         return {"run_id": "run_3421", "status": "queued", "session_id": "session_1"}
