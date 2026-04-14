@@ -838,12 +838,17 @@ def _run_ref_label(run: dict[str, Any]) -> str:
     return "-"
 
 
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
 def _matches_runs_status_filter(run_status: str, requested_status: str | None) -> bool:
     if requested_status is None:
         return True
     normalized = run_status.strip().lower()
-    if requested_status == "running":
-        return normalized not in {"completed", "failed", "cancelled"}
+    # "active" matches any non-terminal state (queued, provisioning, running,
+    # awaiting_approval, generating_story, etc.). "running" matches literally.
+    if requested_status == "active":
+        return normalized not in _TERMINAL_RUN_STATUSES
     return normalized == requested_status
 
 
@@ -1668,8 +1673,12 @@ def build_parser() -> argparse.ArgumentParser:
     runs_list_parser.add_argument("--repo", help="Filter by repository in owner/repo format")
     runs_list_parser.add_argument(
         "--status",
-        choices=("completed", "failed", "running"),
-        help="Filter by validation status",
+        choices=("completed", "failed", "running", "active"),
+        help=(
+            "Filter by validation status. 'running' matches literally; "
+            "'active' matches any non-terminal state (queued, provisioning, "
+            "running, awaiting_approval, etc.)."
+        ),
     )
     runs_list_parser.add_argument("--limit", type=int, default=20, help="Maximum number of runs to show")
     runs_list_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
