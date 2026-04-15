@@ -152,7 +152,7 @@ def seed_and_report(client: Any, status: dict) -> None:
 
         console.print(f"  [bold cyan]{label}[/bold cyan] [dim](backend-only)[/dim]:")
         base_url = with_proxy_token(info.get("base_url", ""), proxy_token)
-        console.print(f"    Base URL: [underline]{base_url}[/underline]")
+        console.print(f"    Base URL: [underline]{base_url}[/underline]", soft_wrap=True, overflow="ignore")
         env_vars = info.get("env_vars", {})
         if env_vars:
             for key, val in env_vars.items():
