@@ -47,6 +47,7 @@ def provision_twins(
     )
     data = client._parse_json(response, "Failed to provision twins")
     run_id = data["run_id"]
+    dim(f"  Run ID: {run_id}")
 
     # Poll until ready
     ready_set: set[str] = set()
