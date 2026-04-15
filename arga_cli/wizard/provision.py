@@ -107,6 +107,23 @@ def provision_twins(
     raise RuntimeError(f"Timed out waiting for twins to provision for run {run_id}.")
 
 
+def _format_seed_summary(seed_info: dict) -> list[str]:
+    """Render a server-reported seed result as a list of display lines."""
+    status_value = seed_info.get("status")
+    if status_value == "seeded":
+        counts = [
+            f"{key.replace('_', ' ')}: {value}"
+            for key, value in seed_info.items()
+            if key not in {"status", "twin"} and isinstance(value, (int, str))
+        ]
+        return [f"Seeded — {', '.join(counts)}"] if counts else ["Seeded."]
+    if status_value == "skipped":
+        return [f"Skipped ({seed_info.get('reason', 'unknown')})"]
+    if status_value == "error":
+        return [f"Seed error: {seed_info.get('error', 'unknown')}"]
+    return ["Default configuration loaded."]
+
+
 def seed_and_report(client: Any, status: dict) -> None:
     """Seed quickstart data for UI twins, print default config for backend-only twins."""
     header("Quickstart setup...")
@@ -121,23 +138,29 @@ def seed_and_report(client: Any, status: dict) -> None:
             backend_twins.append(name)
 
     proxy_token = status.get("proxy_token")
+    seed_results = status.get("seed_results") or {}
 
     # Seed and report UI twins
     for name in ui_twins:
         info = status["twins"][name]
         label = TWIN_CATALOG.get(name, {}).get("label", name)
 
-        # Reset to seed state
-        try:
-            admin_url = info.get("admin_url", "")
-            reset_url = with_proxy_token(f"{admin_url}/admin/reset", proxy_token)
-            client._client.post(reset_url, json={}, headers={"Content-Type": "application/json"})
-        except Exception:
-            pass  # Twin may already be in clean state
+        seed_info = seed_results.get(name)
+        if seed_info is None:
+            # No server-side seeding happened — fall back to the legacy client-side reset.
+            try:
+                admin_url = info.get("admin_url", "")
+                reset_url = with_proxy_token(f"{admin_url}/admin/reset", proxy_token)
+                client._client.post(reset_url, json={}, headers={"Content-Type": "application/json"})
+            except Exception:
+                pass
 
         console.print(f"  [bold cyan]{label}[/bold cyan]:")
-        summary = QUICKSTART_SUMMARIES.get(name, ["Default configuration loaded."])
-        for line in summary:
+        if seed_info is not None:
+            summary_lines = _format_seed_summary(seed_info)
+        else:
+            summary_lines = QUICKSTART_SUMMARIES.get(name, ["Default configuration loaded."])
+        for line in summary_lines:
             console.print(f"    {line}")
 
         # Print env vars
@@ -154,10 +177,14 @@ def seed_and_report(client: Any, status: dict) -> None:
         console.print(f"  [bold cyan]{label}[/bold cyan] [dim](backend-only)[/dim]:")
         base_url = with_proxy_token(info.get("base_url", ""), proxy_token)
         console.print(f"    Base URL: [underline]{base_url}[/underline]")
+        seed_info = seed_results.get(name)
+        if seed_info is not None:
+            for line in _format_seed_summary(seed_info):
+                console.print(f"    {line}")
         env_vars = info.get("env_vars", {})
         if env_vars:
             for key, val in env_vars.items():
                 console.print(f"    [dim]{key}[/dim]: {val}")
-        else:
+        elif seed_info is None:
             dim("    No UI dashboard. Use API calls directly.")
         console.print()
