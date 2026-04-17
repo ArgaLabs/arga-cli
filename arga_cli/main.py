@@ -482,11 +482,16 @@ def _print_twin_env_vars(status: dict) -> None:
     from arga_cli.wizard.provision import with_proxy_token
 
     proxy_token = status.get("proxy_token")
+    # Public `pub-` hosts don't do proxy auth, so the base_url is directly
+    # callable from any native SDK (Slack, Stripe, Discord, …). Appending
+    # `?token=…` would be harmless but misleading — it'd suggest the token
+    # is required, which is exactly the friction public twins eliminate.
+    is_public = bool(status.get("is_public"))
     print("\nTwin environment variables — update your app's config to point at these:\n")
     for name, info in status.get("twins", {}).items():
         label = info.get("label", name)
         base_url = info.get("base_url", "")
-        if proxy_token and base_url:
+        if not is_public and proxy_token and base_url:
             base_url = with_proxy_token(base_url, proxy_token)
         print(f"  {label}:")
         print(f"    Base URL: {base_url}")
@@ -1396,9 +1401,15 @@ def run_wizard_status(_args: argparse.Namespace) -> int:
         f"Status:  {'[green]' + status['status'] + '[/green]' if status['status'] == 'ready' else '[yellow]' + status['status'] + '[/yellow]'}",
         "",
     ]
+    # Public `pub-` hosts are drop-in callable without the proxy token; only
+    # decorate private hosts so the printed URL accurately reflects what
+    # the user needs to use.
+    is_public = bool(status.get("is_public"))
+    proxy_token = status.get("proxy_token")
     for name, info in status.get("twins", {}).items():
         label = TWIN_CATALOG.get(name, {}).get("label", name).ljust(16)
-        url = with_proxy_token(info.get("base_url", ""), status.get("proxy_token"))
+        base_url = info.get("base_url", "")
+        url = base_url if is_public else with_proxy_token(base_url, proxy_token)
         lines.append(f"{label} [underline]{url}[/underline]")
     if status.get("expires_at"):
         lines.append("")
