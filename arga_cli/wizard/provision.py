@@ -114,7 +114,7 @@ def _format_seed_summary(seed_info: dict) -> list[str]:
         counts = [
             f"{key.replace('_', ' ')}: {value}"
             for key, value in seed_info.items()
-            if key not in {"status", "twin"} and isinstance(value, (int, str))
+            if key not in {"status", "twin", "guild_id", "channel_ids"} and isinstance(value, (int, str))
         ]
         return [f"Seeded — {', '.join(counts)}"] if counts else ["Seeded."]
     if status_value == "skipped":
@@ -167,6 +167,15 @@ def seed_and_report(client: Any, status: dict) -> None:
         env_vars = info.get("env_vars", {})
         for key, val in env_vars.items():
             console.print(f"    [dim]{key}[/dim]: {val}")
+
+        # Print IDs from seed results (guild_id, channel_ids, etc.)
+        if seed_info is not None:
+            if seed_info.get("guild_id"):
+                console.print(f"    [dim]GUILD_ID[/dim]: {seed_info['guild_id']}")
+            channel_ids = seed_info.get("channel_ids")
+            if channel_ids:
+                console.print(f"    [dim]CHANNEL_IDS[/dim]: {', '.join(channel_ids)}")
+
         console.print()
 
     # Report backend-only twins
