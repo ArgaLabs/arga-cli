@@ -275,7 +275,8 @@ class ApiClient:
         if response.status_code == 401:
             raise NotAuthenticatedError("Error: Not authenticated. Run `arga login`.")
         if response.status_code == 403:
-            message += " Your plan may not support this feature. Check with `arga whoami`."
+            if not detail:
+                message += " Your plan may not support this feature. Check with `arga whoami`."
         elif response.status_code == 404:
             message += " Check that your plan supports this feature with `arga whoami`."
         elif response.status_code == 429:

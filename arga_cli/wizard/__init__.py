@@ -60,6 +60,11 @@ def run_wizard(
     try:
         status = provision_twins(client, selected, ttl_minutes=10, scenario_prompt=scenario_prompt)
     except Exception as exc:
+        msg = str(exc)
+        if "provisions remaining" in msg.lower():
+            error("\n  You've used all 5 quickstart provisions.")
+            yellow("  Run `arga login` to authenticate with your full account for unlimited access.\n")
+            return 1
         error(f"\n  Provisioning failed: {exc}")
         if env_changes:
             yellow("  Your .env has been updated. You can re-run the wizard to retry provisioning.")
