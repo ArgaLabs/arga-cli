@@ -1343,6 +1343,7 @@ def _wizard_help_text() -> str:
         "  env         Re-run .env rewriting step\n\n"
         "Options:\n"
         "  --api-url            API base URL\n"
+        "  --ttl MINUTES        Session TTL in minutes (paid/team: 1-480, default 60; free: fixed 10)\n"
         "  --no-shape-detect    Disable heuristic detection of API keys by value pattern\n"
         "  -h, --help           Show this help"
     )
@@ -1351,6 +1352,7 @@ def _wizard_help_text() -> str:
 def _build_wizard_init_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arga wizard", allow_abbrev=False)
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("--ttl", type=int, default=None, help="Session TTL in minutes (paid/team: 1-480, default 60)")
     parser.add_argument("--no-shape-detect", action="store_true", default=False)
     return parser
 
@@ -1375,6 +1377,7 @@ def run_wizard_init(args: argparse.Namespace) -> int:
         api_key=api_key,
         cwd=os.getcwd(),
         shape_detect=not getattr(args, "no_shape_detect", False),
+        ttl_minutes=args.ttl,
     )
 
 
