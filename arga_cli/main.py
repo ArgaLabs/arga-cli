@@ -36,6 +36,44 @@ def _cli_version() -> str:
         return "unknown"
 
 
+VERSION_CHECK_PATH = Path.home() / ".config" / "arga" / "version_check.json"
+VERSION_CHECK_TTL_SECONDS = 86400  # 24 hours
+
+
+def _check_for_update() -> None:
+    """Print a warning if a newer version is available on PyPI. Caches for 24h."""
+    try:
+        current = _cli_version()
+        if current == "unknown":
+            return
+
+        now = time.time()
+        cached_latest: str | None = None
+        if VERSION_CHECK_PATH.exists():
+            data = json.loads(VERSION_CHECK_PATH.read_text())
+            if now - data.get("checked_at", 0) < VERSION_CHECK_TTL_SECONDS:
+                cached_latest = data.get("latest")
+
+        if cached_latest is None:
+            resp = httpx.get("https://pypi.org/pypi/arga-cli/json", timeout=3.0)
+            resp.raise_for_status()
+            cached_latest = resp.json()["info"]["version"]
+            VERSION_CHECK_PATH.parent.mkdir(parents=True, exist_ok=True)
+            VERSION_CHECK_PATH.write_text(json.dumps({"latest": cached_latest, "checked_at": now}))
+
+        if cached_latest and cached_latest != current:
+            latest_parts = tuple(int(x) for x in cached_latest.split("."))
+            current_parts = tuple(int(x) for x in current.split("."))
+            if latest_parts > current_parts:
+                print(
+                    f"\033[33mwarning: arga-cli {cached_latest} available (you have {current}). "
+                    f"Update with: uv tool upgrade arga-cli\033[0m",
+                    file=sys.stderr,
+                )
+    except Exception:
+        pass
+
+
 class CliError(Exception):
     """Base CLI error."""
 
@@ -1743,6 +1781,7 @@ def main() -> None:
     except httpx.HTTPError as exc:
         print(f"Network error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
+    _check_for_update()
     raise SystemExit(exit_code)
 
 
