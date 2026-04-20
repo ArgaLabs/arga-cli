@@ -15,6 +15,7 @@ def run_wizard(
     api_key: str | None = None,
     cwd: str,
     shape_detect: bool = True,
+    ttl_minutes: int | None = None,
 ) -> int:
     """Run the full quickstart wizard."""
     from arga_cli.main import ApiClient
@@ -57,8 +58,14 @@ def run_wizard(
     env_changes = rewrite_env_files(cwd, selected, shape_detect=shape_detect)
 
     # Step 5: Provision
+    if ttl_minutes is not None:
+        resolved_ttl = ttl_minutes
+    elif billing_plan == "free":
+        resolved_ttl = 10
+    else:
+        resolved_ttl = 60
     try:
-        status = provision_twins(client, selected, ttl_minutes=10, scenario_prompt=scenario_prompt)
+        status = provision_twins(client, selected, ttl_minutes=resolved_ttl, scenario_prompt=scenario_prompt)
     except Exception as exc:
         msg = str(exc)
         if "provisions remaining" in msg.lower():
