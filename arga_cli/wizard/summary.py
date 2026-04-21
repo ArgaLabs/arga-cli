@@ -9,7 +9,7 @@ from arga_cli.wizard.output import console, dim, print_summary_box
 from arga_cli.wizard.session import save_session
 
 
-def print_summary(cwd: str, status: dict, api_url: str, api_key: str) -> None:
+def print_summary(cwd: str, status: dict, api_url: str, api_key: str, scenario_id: str | None = None) -> None:
     """Print the final summary and write the session state file."""
     dashboard_url = status.get("dashboard_url") or f"{DASHBOARD_BASE_URL}/runs/{status['run_id']}"
     proxy_token = status.get("proxy_token")
@@ -54,6 +54,8 @@ def print_summary(cwd: str, status: dict, api_url: str, api_key: str) -> None:
             for name, info in status.get("twins", {}).items()
         },
     }
+    if scenario_id is not None:
+        session["scenario_id"] = scenario_id
 
     save_session(cwd, session)
     dim(f"Session saved to {SESSION_FILE}")
