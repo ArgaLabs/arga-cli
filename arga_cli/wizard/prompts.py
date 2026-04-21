@@ -138,3 +138,23 @@ def describe_scenario(selected_twins: list[str]) -> str | None:
 
     green("  Scenario noted \u2014 will be applied after provisioning.\n")
     return description.strip()
+
+
+def prompt_save_scenario() -> str | None:
+    """Ask whether to save the scenario to the user's library.
+
+    Returns the chosen name if the user wants to save, or None if declined.
+    """
+    save = questionary.confirm("Save this scenario to your library?", default=False).ask()
+    if not save:
+        return None
+
+    name = questionary.text(
+        "Scenario name:",
+        validate=lambda val: len(val.strip()) > 0 or "Name is required",
+    ).ask()
+
+    if not name or not name.strip():
+        return None
+
+    return name.strip()

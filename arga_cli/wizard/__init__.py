@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from arga_cli.wizard.constants import DASHBOARD_BASE_URL
 from arga_cli.wizard.env import rewrite_env_files
-from arga_cli.wizard.output import console, dim, error, header, yellow
-from arga_cli.wizard.prompts import describe_scenario, prompt_api_key, select_twins
+from arga_cli.wizard.output import console, dim, error, green, header, yellow
+from arga_cli.wizard.prompts import describe_scenario, prompt_api_key, prompt_save_scenario, select_twins
 from arga_cli.wizard.provision import provision_twins, seed_and_report
 from arga_cli.wizard.summary import print_summary
 
@@ -88,10 +89,28 @@ def run_wizard(
         yellow(f"\n  Warning: quickstart seeding failed: {exc}")
         dim("  Twins are running but may not have seed data. You can continue.\n")
 
-    # Step 7: Summary
-    print_summary(cwd, status, api_url, resolved_key)
+    # Step 7: Offer to save scenario
+    scenario_id = None
+    if scenario_prompt:
+        try:
+            scenario_name = prompt_save_scenario()
+            if scenario_name:
+                scenario = client.create_scenario(
+                    name=scenario_name,
+                    prompt=scenario_prompt,
+                    twins=selected,
+                )
+                scenario_id = scenario.get("id")
+                green(f"  Scenario saved: {scenario_name}")
+                dim(f"  View it at {DASHBOARD_BASE_URL}/scenarios\n")
+        except Exception as exc:
+            yellow(f"  Warning: could not save scenario: {exc}")
+            dim("  You can save it later with `arga scenarios create`.\n")
 
-    # Step 8: CLI examples for free plan users
+    # Step 8: Summary
+    print_summary(cwd, status, api_url, resolved_key, scenario_id=scenario_id)
+
+    # Step 9: CLI examples for free plan users
     if billing_plan == "free":
         console.print("\n  [bold]Run validations from the CLI:[/bold]\n")
         console.print('    [cyan]arga test url https://your-app.com "verify the login flow works"[/cyan]')
