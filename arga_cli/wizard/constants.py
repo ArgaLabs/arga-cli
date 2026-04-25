@@ -85,6 +85,12 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.unified.to", "unified.to"],
         "show_in_ui": False,
     },
+    "jira": {
+        "label": "Jira",
+        "port": 12122,
+        "intercept_domains": ["atlassian.net", "auth.atlassian.com", "api.atlassian.com"],
+        "show_in_ui": True,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -183,6 +189,12 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "url_vars": ["UNSTRUCTURED_API_URL", "UNSTRUCTURED_BASE_URL"],
         "secret_vars": [],
         "defaults": {"UNSTRUCTURED_API_KEY": "test-unstructured-key"},
+    },
+    "jira": {
+        "token_vars": ["JIRA_API_TOKEN", "JIRA_TOKEN", "ATLASSIAN_API_TOKEN"],
+        "url_vars": ["JIRA_URL", "JIRA_BASE_URL", "JIRA_SERVER", "ATLASSIAN_URL"],
+        "secret_vars": ["ATLASSIAN_CLIENT_ID", "ATLASSIAN_CLIENT_SECRET"],
+        "defaults": {"JIRA_API_TOKEN": "jira_default_seed_token"},
     },
 }
 
@@ -330,5 +342,12 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
     "unified": [
         "Unified API gateway ready",
         "Bridges to: Slack, Dropbox, Google Calendar, Notion, Google Drive",
+    ],
+    "jira": [
+        'Project: "TEST" (Test Project)',
+        "Issue types: Task, Bug, Story, Epic, Sub-task",
+        "Statuses: To Do, In Progress, Done",
+        "Users: Test User (user001), Second User (user002)",
+        "Token: jira_default_seed_token",
     ],
 }
