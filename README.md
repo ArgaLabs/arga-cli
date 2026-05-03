@@ -1,6 +1,6 @@
 # Arga CLI
 
-`arga` is the command-line interface for authenticating with Arga, installing MCP configuration into supported coding agents, and starting validation runs against deployed apps or pull requests.
+`arga` is the command-line interface for authenticating with Arga, installing MCP configuration into supported coding agents, and managing Arga previews, scenarios, saved browser tests, and live test runs.
 
 ## What It Does
 
@@ -8,8 +8,9 @@
 - Stores a device-scoped API key locally so each terminal/device can be revoked independently.
 - Shows the currently authenticated user and workspace.
 - Installs MCP configuration into supported local agents.
-- Starts URL validation runs from the terminal.
-- Starts pull request validation runs from the terminal.
+- Starts preview runs for URLs, PR checks, sandboxes, and twins.
+- Manages test-runner scenarios, saved tests, blocks, and run history.
+- Imports, exports, validates, and summarizes agent-editable TestConfig JSON.
 - Wraps `git commit` and `git push` with Arga skip-validation helpers.
 
 ## Installation 
@@ -54,24 +55,43 @@ Install MCP configuration for detected agents:
 arga mcp install
 ```
 
-Start a browser validation run:
+Start a browser URL run:
 
 ```bash
-arga test url --url https://demo-app.com --prompt "test the login flow"
+arga test-runner runs url --url https://demo-app.com --prompt "test the login flow"
 ```
 
-Start a pull request validation run:
+Start a PR check preview:
 
 ```bash
-arga validate pr --repo arga-labs/validation-server --pr 182
+arga previews pr-checks run --repo arga-labs/validation-server --pr 182
+```
+
+Run a sandbox preview for a branch:
+
+```bash
+arga previews sandboxes run --repo arga-labs/app --branch feature/demo --twins slack,jira
+```
+
+Provision twins directly:
+
+```bash
+arga previews twins provision --twins slack,jira --ttl 60 --wait
+```
+
+Create and run saved tests:
+
+```bash
+arga test-runner tests create --name "Checkout" --run-id <demo_run_id> --repo arga-labs/app --ci
+arga test-runner tests run <test_id> --url https://preview.example.com
 ```
 
 Any of these commands accept `--json` for machine-parseable output:
 
 ```bash
-arga test url --url https://demo-app.com --prompt "test login" --json
-arga runs list --json
-arga runs status <run_id> --json
+arga test-runner runs url --url https://demo-app.com --prompt "test login" --json
+arga test-runner tests list --json
+arga test-runner runs get <run_id> --json
 ```
 
 Create a commit that skips Arga validation:
@@ -84,9 +104,9 @@ arga push --skip
 Inspect or update automatic validation settings:
 
 ```bash
-arga validate install arga-labs/validation-server
-arga validate config arga-labs/validation-server
-arga validate config set arga-labs/validation-server --trigger branch --branch main --comments on
+arga previews pr-checks install arga-labs/validation-server
+arga previews pr-checks config arga-labs/validation-server
+arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
 ```
 
 List and inspect recent validation runs:
@@ -112,28 +132,67 @@ arga logout
 - `arga whoami` verifies the saved API key and prints the GitHub login plus workspace.
 - `arga logout` removes the local credential and attempts to revoke the current device on the server.
 
-### Validation
+### Previews
 
 ```bash
-arga test url --url https://demo-app.com --prompt "test login flow"
-arga validate pr --repo arga-labs/validation-server --pr 182
-arga validate install arga-labs/validation-server
-arga validate config arga-labs/validation-server
-arga validate config set arga-labs/validation-server --trigger branch --branch main --comments on
+arga previews sandboxes run --repo arga-labs/app --branch feature/demo
+arga previews pr-checks run --repo arga-labs/validation-server --pr 182
+arga previews twins provision --twins slack,jira --ttl 60 --wait
+arga previews twins status <run_id>
+arga previews pr-checks install arga-labs/validation-server
+arga previews pr-checks config arga-labs/validation-server
+arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
 ```
 
-- `arga test url` starts a one-off validation against a deployed URL.
-- `arga validate pr` starts GitHub-backed PR validation for a repository and pull request number.
+- `arga previews sandboxes run` starts a branch-backed sandbox preview. Use `--twins` and `--scenario-id` to include seeded twins.
+- `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
+- `arga previews twins provision` provisions twins without running a browser test.
+- `arga previews pr-checks install/config/config-set` manage automatic PR check settings.
 
-Both accept `--json` to output `{"run_id": "...", "status": "..."}` instead of human-readable text.
-- `arga validate install <repo>` installs the GitHub webhook for automatic validation on a repository.
-- `arga validate config <repo>` shows the current automatic validation settings, including install state, trigger mode, selected branch, and PR comment behavior.
-- `arga validate config set <repo>` updates the automatic validation settings. Any omitted options keep their current value.
+`arga validate pr` remains as a compatibility alias for PR checks.
+
+### Test Runner
+
+```bash
+arga test-runner scenarios list --include-presets
+arga test-runner scenarios import --file scenario.json
+arga test-runner tests list --repo arga-labs/app
+arga test-runner tests import --file saved-test.json
+arga test-runner tests edit <test_id>
+arga test-runner tests run <test_id> --url https://preview.example.com
+arga test-runner runs url --url https://demo-app.com --prompt "test login flow"
+arga test-runner runs list
+arga test-runner runs get <run_id>
+arga test-runner runs logs <run_id>
+arga test-runner runs rerun <run_id>
+arga test-runner runs message <run_id> "Use test@example.com"
+```
+
+- `scenarios` supports list/get/create/import/export/update/delete for twin seed scenarios.
+- `tests` supports list/get/create/import/export/edit/delete/run for saved browser tests.
+- `runs` starts URL runs and inspects live demo-runner history/events.
+- `arga test url` and `arga scenarios ...` remain as compatibility aliases.
+
+### TestConfig JSON
+
+Agents should author saved tests by editing TestConfig JSON:
+
+```bash
+arga test-runner tests config validate --file test_config.json
+arga test-runner tests config summarize --file test_config.json
+arga test-runner tests config normalize --file test_config.json --output test_config.json
+```
+
+Assertions are intentionally primitive and deterministic:
+
+- `{"type": "text", "contains": "Order confirmed"}`
+- `{"type": "url", "contains": "/checkout/success"}`
+- `{"type": "visible"}` plus a selector on the step
 
 For URL validation, you can optionally provide credentials:
 
 ```bash
-arga test url \
+arga test-runner runs url \
   --url https://demo-app.com \
   --prompt "log in and create an order" \
   --email test@company.com \
@@ -142,7 +201,7 @@ arga test url \
 
 Both `--email` and `--password` must be supplied together.
 
-### Validation Runs
+### Legacy Validation Runs
 
 ```bash
 arga runs list --repo arga-labs/validation-server --status running --limit 20
@@ -162,6 +221,8 @@ arga runs cancel <run_id>
 - `arga runs cancel <run_id>` cancels the run through the validation API.
 
 Both `runs list` and `runs status` accept `--json` for structured output.
+
+Use `arga test-runner runs ...` for the newer live browser test-runner run history.
 
 ### Git Wrappers
 
@@ -228,7 +289,7 @@ Key commands support `--json` for use in CI pipelines, shell scripts, and agent 
 
 ```bash
 # Capture the run ID from a validation
-RUN_ID=$(arga test url --url https://app.example.com --prompt "test login" --json | jq -r .run_id)
+RUN_ID=$(arga test-runner runs url --url https://app.example.com --prompt "test login" --json | jq -r .run_id)
 
 # Poll run status as JSON
 arga runs status "$RUN_ID" --json | jq .status
@@ -237,15 +298,17 @@ arga runs status "$RUN_ID" --json | jq .status
 arga runs list --repo arga-labs/validation-server --json | jq '.[].run_id'
 
 # Start PR validation and capture result
-arga validate pr --repo arga-labs/validation-server --pr 182 --json
+arga previews pr-checks run --repo arga-labs/validation-server --pr 182 --json
 ```
 
 Commands that support `--json`:
 
 | Command | JSON shape |
 |---|---|
-| `arga test url` | `{"run_id": "...", "status": "..."}` |
-| `arga validate pr` | `{"run_id": "...", "status": "..."}` |
+| `arga test-runner runs url` | `{"run_id": "...", "status": "..."}` |
+| `arga previews pr-checks run` | `{"run_id": "...", "status": "..."}` |
+| `arga test-runner tests list` | Array of saved tests |
+| `arga test-runner tests run <id>` | Demo runner run object |
 | `arga runs status <id>` | Full run object |
 | `arga runs list` | Array of run summaries |
 
