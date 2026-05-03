@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import socket
@@ -27,6 +28,8 @@ POLL_INTERVAL_SECONDS = 2.0
 POLL_TIMEOUT_SECONDS = 600.0
 URL_VALIDATION_START_TIMEOUT_SECONDS = 60.0
 SKIP_TRAILER = "[skip arga]"
+TEST_CONFIG_ACTIONS = {"goto", "fill", "click", "press", "select", "hover", "expect", "wait", "ask_user_question"}
+TEST_CONFIG_EXPECT_TYPES = {"text", "url", "visible"}
 
 
 def _cli_version() -> str:
@@ -128,6 +131,10 @@ class ApiClient:
         scenario_id: str | None = None,
         provision_id: str | None = None,
         twins: list[str] | None = None,
+        runner_mode: str | None = None,
+        repo: str | None = None,
+        branch: str | None = None,
+        pr_url: str | None = None,
     ) -> dict[str, str]:
         payload: dict[str, object] = {"url": url}
         if prompt is not None:
@@ -145,6 +152,14 @@ class ApiClient:
             payload["provision_id"] = provision_id
         if twins:
             payload["twins"] = twins
+        if runner_mode:
+            payload["runner_mode"] = runner_mode
+        if repo:
+            payload["repo"] = repo
+        if branch:
+            payload["branch"] = branch
+        if pr_url:
+            payload["pr_url"] = pr_url
         response = self._client.post(
             f"{self._api_url}/validate/url-run",
             json=payload,
@@ -153,10 +168,20 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to start URL validation")
 
-    def list_scenarios(self, *, include_presets: bool = False) -> list[dict[str, Any]]:
+    def list_scenarios(
+        self,
+        *,
+        include_presets: bool = False,
+        twin: str | None = None,
+        tag: str | None = None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, str] = {}
         if include_presets:
             params["include_presets"] = "true"
+        if twin:
+            params["twin"] = twin
+        if tag:
+            params["tag"] = tag
         response = self._client.get(
             f"{self._api_url}/scenarios",
             params=params,
@@ -174,6 +199,7 @@ class ApiClient:
         prompt: str | None = None,
         description: str | None = None,
         twins: list[str] | None = None,
+        seed_config: dict[str, Any] | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"name": name}
@@ -183,6 +209,8 @@ class ApiClient:
             payload["description"] = description
         if twins:
             payload["twins"] = twins
+        if seed_config is not None:
+            payload["seed_config"] = seed_config
         if tags:
             payload["tags"] = tags
         response = self._client.post(
@@ -193,12 +221,92 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to create scenario")
 
+    def get_scenario(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/scenarios/{scenario_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load scenario")
+
+    def update_scenario(self, scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.put(
+            f"{self._api_url}/scenarios/{scenario_id}",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
+        )
+        return self._parse_json(response, "Failed to update scenario")
+
     def delete_scenario(self, scenario_id: str) -> dict[str, str]:
         response = self._client.delete(
             f"{self._api_url}/scenarios/{scenario_id}",
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to delete scenario")
+
+    def start_pr_run(
+        self,
+        *,
+        repo: str,
+        branch: str | None = None,
+        pr_url: str | None = None,
+        frontend_url: str | None = None,
+        context_notes: str | None = None,
+        scenario_prompt: str | None = None,
+        scenario_id: str | None = None,
+        twins: list[str] | None = None,
+        session_id: str | None = None,
+        run_type: str = "pr_run",
+        stream: bool = True,
+    ) -> dict[str, str]:
+        payload: dict[str, Any] = {"repo": repo, "run_type": run_type}
+        if branch:
+            payload["branch"] = branch
+        if pr_url:
+            payload["pr_url"] = pr_url
+        if frontend_url:
+            payload["frontend_url"] = frontend_url
+        if context_notes:
+            payload["context_notes"] = context_notes
+        if scenario_prompt:
+            payload["scenario_prompt"] = scenario_prompt
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
+        if twins:
+            payload["twins"] = twins
+        if session_id:
+            payload["session_id"] = session_id
+
+        if not stream:
+            response = self._client.post(
+                f"{self._api_url}/validate/pr-run",
+                json=payload,
+                headers=self._auth_headers(),
+            )
+            return self._parse_json(response, "Failed to start preview run")
+
+        with self._client.stream(
+            "POST",
+            f"{self._api_url}/validate/pr-run",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
+        ) as response:
+            if not response.is_success:
+                try:
+                    detail_payload = json.loads(response.read().decode("utf-8"))
+                except ValueError as exc:
+                    raise CliError("Failed to start preview run") from exc
+                self._parse_json(
+                    httpx.Response(response.status_code, json=detail_payload),
+                    "Failed to start preview run",
+                )
+            run_id = response.headers.get("X-Run-Id")
+            session_id_header = response.headers.get("X-Session-Id")
+            # Drain the story stream so the server can finish its initial planning work.
+            for _ in response.iter_text():
+                pass
+            return {"run_id": run_id or "unknown", "session_id": session_id_header or "", "status": "generating_story"}
 
     def start_pr_validation(
         self,
@@ -207,15 +315,36 @@ class ApiClient:
         pr_number: int,
         context_notes: str | None = None,
     ) -> dict[str, str]:
-        payload: dict[str, Any] = {"repo": repo, "pr_number": pr_number}
-        if context_notes:
-            payload["context_notes"] = context_notes
+        return self.start_pr_run(
+            repo=repo,
+            pr_url=f"https://github.com/{repo}/pull/{pr_number}",
+            context_notes=context_notes,
+            run_type="pr_run",
+        )
+
+    def provision_twins_start(
+        self,
+        *,
+        twins: list[str],
+        ttl_minutes: int,
+        scenario_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"twins": twins, "ttl_minutes": ttl_minutes, "scenario": "quickstart"}
+        if scenario_prompt:
+            payload["scenario_prompt"] = scenario_prompt
         response = self._client.post(
-            f"{self._api_url}/validation/pr",
+            f"{self._api_url}/validate/twins/provision",
             json=payload,
             headers=self._auth_headers(),
         )
-        return self._parse_json(response, "Failed to start PR validation")
+        return self._parse_json(response, "Failed to provision twins")
+
+    def get_twin_provision_status(self, run_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/validate/twins/provision/{run_id}/status",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load twin provision status")
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         response = self._client.get(
@@ -254,6 +383,149 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to cancel validation run")
+
+    def create_demo_run(
+        self,
+        *,
+        prompt: str,
+        start_url: str | None = None,
+        test_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"prompt": prompt}
+        if start_url:
+            payload["start_url"] = start_url
+        if test_config is not None:
+            payload["test_config"] = test_config
+        response = self._client.post(
+            f"{self._api_url}/demo-runner/runs",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to create test runner run")
+
+    def list_demo_runs(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/demo-runner/runs",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list test runner runs")
+        runs = payload.get("runs") if isinstance(payload, dict) else None
+        if not isinstance(runs, list):
+            raise CliError("Unexpected response from /demo-runner/runs")
+        return runs
+
+    def get_demo_run(self, run_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/demo-runner/runs/{run_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load test runner run")
+
+    def rerun_demo_run(
+        self,
+        run_id: str,
+        *,
+        prompt: str | None = None,
+        start_url: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if prompt:
+            payload["prompt"] = prompt
+        if start_url:
+            payload["start_url"] = start_url
+        response = self._client.post(
+            f"{self._api_url}/demo-runner/runs/{run_id}/rerun",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to rerun test runner run")
+
+    def update_demo_run_config(self, run_id: str, test_config: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.patch(
+            f"{self._api_url}/demo-runner/runs/{run_id}/config",
+            json={"test_config": test_config},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to update test runner config")
+
+    def send_demo_run_message(self, run_id: str, message: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/demo-runner/runs/{run_id}/messages",
+            json={"message": message},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to send test runner message")
+
+    def list_demo_tests(self, *, repo: str | None = None) -> list[dict[str, Any]]:
+        params = {"repo_full_name": repo} if repo else None
+        response = self._client.get(
+            f"{self._api_url}/demo-runner/tests",
+            params=params,
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list saved tests")
+        tests = payload.get("tests") if isinstance(payload, dict) else None
+        if not isinstance(tests, list):
+            raise CliError("Unexpected response from /demo-runner/tests")
+        return tests
+
+    def create_demo_test(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/demo-runner/tests",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to create saved test")
+
+    def get_demo_test(self, test_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/demo-runner/tests/{test_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load saved test")
+
+    def update_demo_test(self, test_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.patch(
+            f"{self._api_url}/demo-runner/tests/{test_id}",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to update saved test")
+
+    def delete_demo_test(self, test_id: str) -> dict[str, Any]:
+        response = self._client.delete(
+            f"{self._api_url}/demo-runner/tests/{test_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to delete saved test")
+
+    def run_demo_test(
+        self,
+        test_id: str,
+        *,
+        start_url: str | None = None,
+        prompt: str | None = None,
+        twins: list[str] | None = None,
+        ttl_minutes: int | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if start_url:
+            payload["start_url"] = start_url
+        if prompt:
+            payload["prompt"] = prompt
+        if twins:
+            payload["twins"] = twins
+        if ttl_minutes is not None:
+            payload["ttl_minutes"] = ttl_minutes
+        if session_id:
+            payload["session_id"] = session_id
+        response = self._client.post(
+            f"{self._api_url}/demo-runner/tests/{test_id}/run",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to run saved test")
 
     def install_github_validation(self, *, repo: str) -> dict[str, Any]:
         response = self._client.post(
@@ -516,6 +788,159 @@ def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
     return FREE_TTL
 
 
+def _warn_deprecated_alias(args: argparse.Namespace, replacement: str) -> None:
+    if not getattr(args, "json", False) and getattr(args, "deprecated_alias", False):
+        print(f"warning: this command is deprecated; use `{replacement}`.", file=sys.stderr)
+
+
+def _split_csv(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or None
+
+
+def _read_json_file(path: str | Path) -> dict[str, Any]:
+    file_path = Path(path)
+    try:
+        payload = json.loads(file_path.read_text())
+    except FileNotFoundError as exc:
+        raise CliError(f"File not found: {file_path}") from exc
+    except json.JSONDecodeError as exc:
+        raise CliError(f"Invalid JSON in {file_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise CliError(f"Expected a JSON object in {file_path}")
+    return payload
+
+
+def _write_json_output(payload: dict[str, Any], output: str | None) -> None:
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if output:
+        Path(output).write_text(text)
+    else:
+        print(text, end="")
+
+
+def _extract_test_config(payload: dict[str, Any]) -> dict[str, Any]:
+    config = payload.get("test_config_json", payload.get("test_config", payload))
+    if not isinstance(config, dict):
+        raise CliError("Expected a TestConfig object or an object containing test_config/test_config_json.")
+    return config
+
+
+def _validate_test_config(config: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    steps = config.get("steps")
+    if not isinstance(steps, list):
+        errors.append("steps must be a list")
+        return errors
+    if "starting_url" in config and config["starting_url"] is not None and not isinstance(config["starting_url"], str):
+        errors.append("starting_url must be a string")
+    if "prompt" in config and config["prompt"] is not None and not isinstance(config["prompt"], str):
+        errors.append("prompt must be a string")
+    parameters = config.get("parameters", [])
+    if parameters is not None and not isinstance(parameters, list):
+        errors.append("parameters must be a list")
+
+    for index, raw_step in enumerate(steps, start=1):
+        label = f"steps[{index - 1}]"
+        if not isinstance(raw_step, dict):
+            errors.append(f"{label} must be an object")
+            continue
+        action = raw_step.get("action")
+        if action not in TEST_CONFIG_ACTIONS:
+            errors.append(f"{label}.action must be one of {', '.join(sorted(TEST_CONFIG_ACTIONS))}")
+        if action == "expect":
+            expect = raw_step.get("expect")
+            if not isinstance(expect, dict):
+                errors.append(f"{label}.expect must be an object")
+                continue
+            expect_type = expect.get("type")
+            if expect_type not in TEST_CONFIG_EXPECT_TYPES:
+                errors.append(f"{label}.expect.type must be one of text, url, visible")
+            if expect_type in {"text", "url"} and not str(expect.get("contains") or "").strip():
+                errors.append(f"{label}.expect.contains is required for {expect_type} assertions")
+            if expect_type == "visible" and not str(raw_step.get("selector") or expect.get("selector") or "").strip():
+                errors.append(f"{label}.selector is required for visible assertions")
+    return errors
+
+
+def _normalized_test_config(config: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(config)
+    normalized.setdefault("version", 1)
+    normalized.setdefault("fallback", "agent")
+    normalized.setdefault("defaults", {})
+    normalized.setdefault("parameters", [])
+    steps = normalized.setdefault("steps", [])
+    if not isinstance(steps, list):
+        return normalized
+    for index, step in enumerate(steps, start=1):
+        if not isinstance(step, dict):
+            continue
+        step.setdefault("id", f"step_{index}")
+        step.setdefault("ordinal", index)
+        if step.get("action") == "expect" and isinstance(step.get("expect"), dict):
+            expect = step["expect"]
+            if expect.get("type") == "visible" and expect.get("selector") and not step.get("selector"):
+                step["selector"] = expect.get("selector")
+    return normalized
+
+
+def _assert_valid_test_config(config: dict[str, Any]) -> None:
+    errors = _validate_test_config(config)
+    if errors:
+        raise CliError("Invalid TestConfig:\n" + "\n".join(f"- {error}" for error in errors))
+
+
+def _step_target(step: dict[str, Any]) -> str:
+    return str(step.get("selector") or step.get("target") or step.get("wait_for") or step.get("value") or "-")
+
+
+def _step_value(step: dict[str, Any]) -> str:
+    action = step.get("action")
+    if action == "expect":
+        expect = step.get("expect") if isinstance(step.get("expect"), dict) else {}
+        expect_type = str(expect.get("type") or "-")
+        if expect_type == "visible":
+            selector = str(step.get("selector") or expect.get("selector") or "-")
+            return f"{selector} is visible"
+        contains = str(expect.get("contains") or "")
+        return f"{expect_type} contains {contains}" if contains else expect_type
+    value = step.get("value")
+    return "-" if value is None else str(value)
+
+
+def _print_test_config_summary(config: dict[str, Any]) -> None:
+    steps = config.get("steps") if isinstance(config.get("steps"), list) else []
+    print(f"Prompt: {config.get('prompt') or '-'}")
+    print(f"Starting URL: {config.get('starting_url') or '-'}")
+    print(f"Fallback: {config.get('fallback') or '-'}")
+    print(f"Parameters: {len(config.get('parameters') or [])}")
+    print(f"Blocks: {len(steps)}")
+    print()
+    headers = ["#", "ACTION", "TARGET", "VALUE", "PARAMS"]
+    rows: list[list[str]] = []
+    for index, raw_step in enumerate(steps, start=1):
+        step = raw_step if isinstance(raw_step, dict) else {}
+        param_refs = step.get("parameter_refs")
+        rows.append(
+            [
+                str(index),
+                str(step.get("action") or "-"),
+                _step_target(step),
+                _step_value(step),
+                ", ".join(str(item) for item in param_refs) if isinstance(param_refs, list) else "-",
+            ]
+        )
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+
+
 def _print_twin_env_vars(status: dict) -> None:
     """Print twin URLs and env vars so the user can configure their app."""
     from arga_cli.wizard.provision import with_proxy_token
@@ -541,19 +966,23 @@ def _print_twin_env_vars(status: dict) -> None:
 
 
 def run_test_url(args: argparse.Namespace) -> int:
+    _warn_deprecated_alias(args, "arga test-runner runs url")
     if bool(args.email) != bool(args.password):
         raise CliError("Both --email and --password must be provided together.")
 
     scenario_id = getattr(args, "scenario", None)
-    if not args.prompt and not scenario_id:
+    test_config: dict[str, Any] | None = None
+    test_config_file = getattr(args, "test_config", None)
+    if test_config_file:
+        test_config = _normalized_test_config(_extract_test_config(_read_json_file(test_config_file)))
+        _assert_valid_test_config(test_config)
+
+    if not args.prompt and not scenario_id and not test_config:
         raise CliError("Either --prompt or --scenario must be provided.")
 
-    twins_arg: list[str] | None = None
-    raw_twins = getattr(args, "twins", None)
-    if raw_twins:
-        twins_arg = [t.strip() for t in raw_twins.split(",") if t.strip()]
+    twins_arg = _split_csv(getattr(args, "twins", None))
 
-    if not args.url and not twins_arg:
+    if not args.url and not twins_arg and not (test_config and test_config.get("starting_url")):
         raise CliError("--url is required (or use --twins to provision twins first).")
 
     url: str = args.url or ""
@@ -593,21 +1022,33 @@ def run_test_url(args: argparse.Namespace) -> int:
                     print("\nCancelled.")
                     return 1
 
-        payload = client.start_url_validation(
-            url=url,
-            prompt=args.prompt,
-            email=args.email,
-            password=args.password,
-            ttl_minutes=ttl_minutes,
-            scenario_id=scenario_id,
-            provision_id=provision_id,
-            twins=twins_arg if not provision_id else None,
-        )
+        if test_config is not None:
+            prompt = args.prompt or str(test_config.get("prompt") or "Run this saved browser test.")
+            start_url = url or str(test_config.get("starting_url") or "")
+            if not start_url:
+                raise CliError("--url is required when --test-config has no starting_url.")
+            payload = client.create_demo_run(prompt=prompt, start_url=start_url, test_config=test_config)
+        else:
+            start_kwargs: dict[str, Any] = {
+                "url": url,
+                "prompt": args.prompt,
+                "email": args.email,
+                "password": args.password,
+                "ttl_minutes": ttl_minutes,
+                "scenario_id": scenario_id,
+                "provision_id": provision_id,
+                "twins": twins_arg if not provision_id else None,
+            }
+            for key in ("runner_mode", "repo", "branch", "pr_url"):
+                value = getattr(args, key, None)
+                if value:
+                    start_kwargs[key] = value
+            payload = client.start_url_validation(**start_kwargs)
     finally:
         client.close()
 
     if getattr(args, "json", False):
-        print(json.dumps({"run_id": payload.get("run_id"), "status": payload.get("status")}))
+        print(json.dumps({"run_id": payload.get("run_id") or payload.get("id"), "status": payload.get("status")}))
         return 0
 
     print("Starting validation...\n")
@@ -617,39 +1058,164 @@ def run_test_url(args: argparse.Namespace) -> int:
     if scenario_id:
         print(f"Scenario: {scenario_id}")
     print(f"TTL: {ttl_minutes} minutes\n")
-    print(f"Run ID: {payload.get('run_id', 'unknown')}")
+    print(f"Run ID: {payload.get('run_id') or payload.get('id', 'unknown')}")
     print(f"Status: {payload.get('status', 'unknown')}")
     return 0
 
 
 def run_validate_pr(args: argparse.Namespace) -> int:
+    _warn_deprecated_alias(args, "arga previews pr-checks run")
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        payload = client.start_pr_validation(
-            repo=args.repo, pr_number=args.pr, context_notes=getattr(args, "context_notes", None)
+        if any(
+            getattr(args, name, None)
+            for name in ("branch", "pr_url", "frontend_url", "scenario_prompt", "scenario_id", "twins", "session_id")
+        ) or getattr(args, "run_type", "pr_run") != "pr_run":
+            payload = client.start_pr_run(
+                repo=args.repo,
+                branch=getattr(args, "branch", None),
+                pr_url=getattr(args, "pr_url", None)
+                or (f"https://github.com/{args.repo}/pull/{args.pr}" if getattr(args, "pr", None) else None),
+                frontend_url=getattr(args, "frontend_url", None),
+                context_notes=getattr(args, "context_notes", None),
+                scenario_prompt=getattr(args, "scenario_prompt", None),
+                scenario_id=getattr(args, "scenario_id", None),
+                twins=_split_csv(getattr(args, "twins", None)),
+                session_id=getattr(args, "session_id", None),
+                run_type=getattr(args, "run_type", "pr_run"),
+            )
+        else:
+            kwargs: dict[str, Any] = {"repo": args.repo, "pr_number": args.pr}
+            if getattr(args, "context_notes", None):
+                kwargs["context_notes"] = args.context_notes
+            payload = client.start_pr_validation(**kwargs)
+    finally:
+        client.close()
+
+    if args.json:
+        output = {"run_id": payload.get("run_id"), "status": payload.get("status")}
+        if payload.get("session_id"):
+            output["session_id"] = payload.get("session_id")
+        print(json.dumps(output))
+        return 0
+
+    print("Starting PR validation...\n")
+    print(f"Repository: {args.repo}")
+    if getattr(args, "pr", None):
+        print(f"PR: #{args.pr}\n")
+    elif getattr(args, "pr_url", None):
+        print(f"PR URL: {args.pr_url}\n")
+    elif getattr(args, "branch", None):
+        print(f"Branch: {args.branch}\n")
+    print("Validation run started.")
+    print(f"Run ID: {payload.get('run_id', 'unknown')}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    if payload.get("session_id"):
+        print(f"Session ID: {payload['session_id']}")
+    return 0
+
+
+def run_previews_sandbox_run(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.start_pr_run(
+            repo=args.repo,
+            branch=args.branch,
+            pr_url=getattr(args, "pr_url", None),
+            frontend_url=getattr(args, "frontend_url", None),
+            context_notes=getattr(args, "context_notes", None),
+            scenario_prompt=getattr(args, "scenario_prompt", None),
+            scenario_id=getattr(args, "scenario_id", None),
+            twins=_split_csv(getattr(args, "twins", None)),
+            session_id=getattr(args, "session_id", None),
+            run_type="agent_run",
         )
     finally:
         client.close()
 
     if args.json:
-        print(json.dumps({"run_id": payload.get("run_id"), "status": payload.get("status")}))
+        print(json.dumps(payload))
         return 0
 
-    print("Starting PR validation...\n")
+    print("Sandbox preview started.")
     print(f"Repository: {args.repo}")
-    print(f"PR: #{args.pr}\n")
-    print("Validation run started.")
+    print(f"Branch: {args.branch}")
     print(f"Run ID: {payload.get('run_id', 'unknown')}")
     print(f"Status: {payload.get('status', 'unknown')}")
+    if payload.get("session_id"):
+        print(f"Session ID: {payload['session_id']}")
+    return 0
+
+
+def run_twins_provision(args: argparse.Namespace) -> int:
+    twins = _split_csv(args.twins)
+    if not twins:
+        raise CliError("--twins must include at least one twin name.")
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        ttl_minutes = _resolve_ttl(client, args.ttl)
+        status = client.provision_twins_start(
+            twins=twins,
+            ttl_minutes=ttl_minutes or 30,
+            scenario_prompt=getattr(args, "scenario_prompt", None),
+        )
+        run_id = str(status.get("run_id") or "")
+        if not run_id:
+            raise CliError("Twin provisioning did not return a run_id.")
+        if getattr(args, "wait", False):
+            deadline = time.monotonic() + float(getattr(args, "timeout", 300))
+            while time.monotonic() < deadline:
+                status = client.get_twin_provision_status(run_id)
+                if status.get("status") in {"ready", "failed"}:
+                    break
+                time.sleep(3.0)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(status, indent=2))
+        return 0
+
+    print("Twin provisioning started.")
+    print(f"Run ID: {status.get('run_id', run_id)}")
+    print(f"Status: {status.get('status', 'queued')}")
+    if status.get("status") == "ready":
+        _print_twin_env_vars(status)
+    return 0
+
+
+def run_twins_status(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        status = client.get_twin_provision_status(args.run_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(status, indent=2))
+        return 0
+
+    print(f"Run ID: {status.get('run_id', args.run_id)}")
+    print(f"Status: {status.get('status', 'unknown')}")
+    if status.get("status") == "ready":
+        _print_twin_env_vars(status)
     return 0
 
 
 def run_scenarios_list(args: argparse.Namespace) -> int:
+    _warn_deprecated_alias(args, "arga test-runner scenarios list")
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        scenarios = client.list_scenarios(include_presets=getattr(args, "include_presets", False))
+        scenarios = client.list_scenarios(
+            include_presets=getattr(args, "include_presets", False),
+            twin=getattr(args, "twin", None),
+            tag=getattr(args, "tag", None),
+        )
     finally:
         client.close()
 
@@ -675,6 +1241,7 @@ def run_scenarios_list(args: argparse.Namespace) -> int:
 
 
 def run_scenarios_create(args: argparse.Namespace) -> int:
+    _warn_deprecated_alias(args, "arga test-runner scenarios create")
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
@@ -683,6 +1250,7 @@ def run_scenarios_create(args: argparse.Namespace) -> int:
             prompt=args.prompt,
             description=getattr(args, "description", None),
             twins=getattr(args, "twin", None),
+            seed_config=None,
             tags=getattr(args, "tag", None),
         )
     finally:
@@ -700,7 +1268,77 @@ def run_scenarios_create(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_scenarios_get(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenario = client.get_scenario(args.scenario_id)
+    finally:
+        client.close()
+    print(json.dumps(scenario, indent=2))
+    return 0
+
+
+def run_scenarios_import(args: argparse.Namespace) -> int:
+    payload = _read_json_file(args.file)
+    if "name" not in payload:
+        raise CliError("Scenario import JSON must include name.")
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenario = client.create_scenario(
+            name=str(payload["name"]),
+            prompt=payload.get("prompt"),
+            description=payload.get("description"),
+            twins=payload.get("twins"),
+            seed_config=payload.get("seed_config"),
+            tags=payload.get("tags"),
+        )
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(scenario, indent=2))
+    else:
+        print("Scenario imported.")
+        print(f"  id: {scenario.get('id')}")
+        print(f"  name: {scenario.get('name')}")
+    return 0
+
+
+def run_scenarios_export(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenario = client.get_scenario(args.scenario_id)
+    finally:
+        client.close()
+    _write_json_output(scenario, args.output)
+    return 0
+
+
+def run_scenarios_update(args: argparse.Namespace) -> int:
+    payload = _read_json_file(args.file)
+    payload.pop("id", None)
+    payload.pop("created_at", None)
+    payload.pop("updated_at", None)
+    payload.pop("is_preset", None)
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        scenario = client.update_scenario(args.scenario_id, payload)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(scenario, indent=2))
+    else:
+        print("Scenario updated.")
+        print(f"  id: {scenario.get('id')}")
+        print(f"  name: {scenario.get('name')}")
+    return 0
+
+
 def run_scenarios_delete(args: argparse.Namespace) -> int:
+    _warn_deprecated_alias(args, "arga test-runner scenarios delete")
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
@@ -740,6 +1378,7 @@ def _build_validate_pr_parser() -> argparse.ArgumentParser:
         help="Optional notes to focus the validation on specific changes",
     )
     parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    parser.set_defaults(deprecated_alias=True)
     return parser
 
 
@@ -1207,6 +1846,408 @@ def run_runs_cancel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_demo_runs_table(runs: list[dict[str, Any]]) -> None:
+    headers = ["RUN_ID", "STATUS", "MODE", "START_URL", "UPDATED"]
+    rows = [
+        [
+            str(run.get("id") or "-"),
+            str(run.get("status") or "-"),
+            str(run.get("mode") or "-"),
+            str(run.get("start_url") or "-"),
+            _format_timestamp(run.get("updated_at") or run.get("created_at")),
+        ]
+        for run in runs
+    ]
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+
+
+def _print_demo_run(run: dict[str, Any]) -> None:
+    print(f"Run ID: {run.get('id', '-')}")
+    print(f"Status: {run.get('status', '-')}")
+    print(f"Mode: {run.get('mode', '-')}")
+    print(f"Source Run: {run.get('source_run_id') or '-'}")
+    print(f"Start URL: {run.get('start_url') or '-'}")
+    print(f"Prompt: {run.get('prompt') or '-'}")
+    print(f"Blocks: {len((run.get('test_config_json') or {}).get('steps') or [])}")
+    print(f"Events: {len(run.get('events_json') or [])}")
+    if run.get("error_message"):
+        print(f"Error: {run['error_message']}")
+
+
+def run_demo_runs_list(args: argparse.Namespace) -> int:
+    _warn_deprecated_alias(args, "arga test-runner runs list")
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        runs = client.list_demo_runs()
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(runs, indent=2))
+        return 0
+    if not runs:
+        print("No test runner runs found.")
+        return 0
+    _print_demo_runs_table(runs)
+    return 0
+
+
+def run_demo_runs_get(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        run = client.get_demo_run(args.run_id)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(run, indent=2))
+    else:
+        _print_demo_run(run)
+    return 0
+
+
+def run_demo_runs_logs(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        run = client.get_demo_run(args.run_id)
+    finally:
+        client.close()
+    events = run.get("events_json") or []
+    if args.json:
+        print(json.dumps(events, indent=2))
+        return 0
+    if not events:
+        print("No events recorded for this test runner run.")
+        return 0
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        header = " | ".join(
+            part
+            for part in (
+                _format_timestamp(event.get("timestamp")),
+                str(event.get("type") or "").strip(),
+            )
+            if part and part != "-"
+        )
+        print(header or "event")
+        message = str(event.get("message") or "").strip()
+        if message:
+            print(message)
+        print()
+    return 0
+
+
+def run_demo_runs_rerun(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        run = client.rerun_demo_run(args.run_id, prompt=args.prompt, start_url=args.url)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(run, indent=2))
+    else:
+        print("Test runner rerun started.")
+        print(f"Run ID: {run.get('id', '-')}")
+        print(f"Status: {run.get('status', '-')}")
+    return 0
+
+
+def run_demo_runs_message(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        run = client.send_demo_run_message(args.run_id, args.message)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(run, indent=2))
+    else:
+        print("Message sent.")
+        print(f"Run ID: {run.get('id', args.run_id)}")
+        print(f"Events: {len(run.get('events_json') or [])}")
+    return 0
+
+
+def _print_tests_table(tests: list[dict[str, Any]]) -> None:
+    headers = ["TEST_ID", "NAME", "REPO", "CI", "BLOCKS", "UPDATED"]
+    rows = []
+    for test in tests:
+        config = test.get("test_config_json") if isinstance(test.get("test_config_json"), dict) else {}
+        rows.append(
+            [
+                str(test.get("id") or "-"),
+                str(test.get("name") or "-"),
+                str(test.get("repo_full_name") or "-"),
+                "yes" if test.get("ci_enabled") else "no",
+                str(len(config.get("steps") or [])),
+                _format_timestamp(test.get("updated_at") or test.get("created_at")),
+            ]
+        )
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+
+
+def _test_payload_from_file(path: str) -> dict[str, Any]:
+    payload = _read_json_file(path)
+    if "test_config_json" in payload and "test_config" not in payload:
+        payload["test_config"] = payload.pop("test_config_json")
+    if "test_config" in payload:
+        config = _normalized_test_config(_extract_test_config(payload["test_config"] if isinstance(payload["test_config"], dict) else payload))
+        _assert_valid_test_config(config)
+        payload["test_config"] = config
+    return payload
+
+
+def run_tests_list(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        tests = client.list_demo_tests(repo=args.repo)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(tests, indent=2))
+        return 0
+    if not tests:
+        print("No saved tests found.")
+        return 0
+    _print_tests_table(tests)
+    return 0
+
+
+def run_tests_get(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        test = client.get_demo_test(args.test_id)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(test, indent=2))
+    else:
+        print(f"Test ID: {test.get('id', args.test_id)}")
+        print(f"Name: {test.get('name', '-')}")
+        print(f"Repository: {test.get('repo_full_name') or '-'}")
+        print(f"CI Enabled: {_bool_label(bool(test.get('ci_enabled')))}")
+        print(f"Start URL: {test.get('start_url') or '-'}")
+        print(f"Prompt: {test.get('prompt') or '-'}")
+        print()
+        _print_test_config_summary(test.get("test_config_json") or {})
+    return 0
+
+
+def run_tests_create(args: argparse.Namespace) -> int:
+    payload: dict[str, Any] = {"name": args.name}
+    for attr, key in (
+        ("description", "description"),
+        ("run_id", "run_id"),
+        ("prompt", "prompt"),
+        ("url", "start_url"),
+        ("repo", "repo_full_name"),
+    ):
+        value = getattr(args, attr, None)
+        if value:
+            payload[key] = value
+    if getattr(args, "ci", False):
+        payload["ci_enabled"] = True
+    if getattr(args, "tag", None):
+        payload["tags"] = args.tag
+    if getattr(args, "test_config", None):
+        config = _normalized_test_config(_extract_test_config(_read_json_file(args.test_config)))
+        _assert_valid_test_config(config)
+        payload["test_config"] = config
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        test = client.create_demo_test(payload)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(test, indent=2))
+    else:
+        print("Saved test created.")
+        print(f"Test ID: {test.get('id')}")
+        print(f"Name: {test.get('name')}")
+    return 0
+
+
+def run_tests_import(args: argparse.Namespace) -> int:
+    payload = _test_payload_from_file(args.file)
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        test = client.create_demo_test(payload)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(test, indent=2))
+    else:
+        print("Saved test imported.")
+        print(f"Test ID: {test.get('id')}")
+        print(f"Name: {test.get('name')}")
+    return 0
+
+
+def run_tests_export(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        test = client.get_demo_test(args.test_id)
+    finally:
+        client.close()
+    _write_json_output(test, args.output)
+    return 0
+
+
+def run_tests_edit(args: argparse.Namespace) -> int:
+    editor = os.environ.get("EDITOR")
+    if not editor:
+        raise CliError("Set $EDITOR to use `arga test-runner tests edit`.")
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        test = client.get_demo_test(args.test_id)
+        editable = {
+            "name": test.get("name"),
+            "description": test.get("description"),
+            "prompt": test.get("prompt"),
+            "start_url": test.get("start_url"),
+            "repo_full_name": test.get("repo_full_name"),
+            "ci_enabled": test.get("ci_enabled"),
+            "tags": test.get("tags") or [],
+            "test_config": test.get("test_config_json") or {},
+        }
+        with tempfile.NamedTemporaryFile("w+", suffix=".json", delete=False, encoding="utf-8") as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(json.dumps(editable, indent=2, sort_keys=True) + "\n")
+        try:
+            subprocess.run([editor, str(tmp_path)], check=True)
+            payload = _test_payload_from_file(str(tmp_path))
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        updated = client.update_demo_test(args.test_id, payload)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(updated, indent=2))
+    else:
+        print("Saved test updated.")
+        print(f"Test ID: {updated.get('id')}")
+        print(f"Name: {updated.get('name')}")
+    return 0
+
+
+def run_tests_delete(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        result = client.delete_demo_test(args.test_id)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(result))
+    else:
+        print(f"Deleted saved test {args.test_id}.")
+    return 0
+
+
+def run_tests_run(args: argparse.Namespace) -> int:
+    twins_arg = _split_csv(args.twins)
+    start_url = args.url
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        ttl_minutes = _resolve_ttl(client, args.ttl)
+        if twins_arg:
+            from arga_cli.wizard.provision import provision_twins
+
+            status = provision_twins(client, twins_arg, ttl_minutes=ttl_minutes or 30)
+            _print_twin_env_vars(status)
+            if not start_url:
+                print("Deploy your app with the environment variables above.")
+                print("Press Ctrl+C to cancel.\n")
+                try:
+                    start_url = input("Enter your staging URL: ").strip()
+                except KeyboardInterrupt:
+                    print("\nCancelled.")
+                    return 1
+                if not start_url:
+                    raise CliError("A URL is required to start the saved test run.")
+                print()
+            else:
+                print("Deploy your app with the environment variables above, then press Enter to start the saved test.")
+                print("Press Ctrl+C to cancel.\n")
+                try:
+                    input()
+                except KeyboardInterrupt:
+                    print("\nCancelled.")
+                    return 1
+        run = client.run_demo_test(
+            args.test_id,
+            start_url=start_url,
+            prompt=args.prompt,
+            twins=twins_arg,
+            ttl_minutes=ttl_minutes,
+            session_id=args.session_id,
+        )
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(run, indent=2))
+    else:
+        print("Saved test run started.")
+        print(f"Run ID: {run.get('id') or run.get('run_id') or '-'}")
+        print(f"Status: {run.get('status', '-')}")
+        print(f"Start URL: {run.get('start_url') or start_url or '-'}")
+    return 0
+
+
+def run_tests_config_validate(args: argparse.Namespace) -> int:
+    config = _normalized_test_config(_extract_test_config(_read_json_file(args.file)))
+    errors = _validate_test_config(config)
+    if args.json:
+        print(json.dumps({"valid": not errors, "errors": errors}, indent=2))
+        return 0 if not errors else 1
+    if errors:
+        print("Invalid TestConfig:")
+        for error in errors:
+            print(f"- {error}")
+        return 1
+    print("TestConfig is valid.")
+    return 0
+
+
+def run_tests_config_summarize(args: argparse.Namespace) -> int:
+    config = _normalized_test_config(_extract_test_config(_read_json_file(args.file)))
+    _assert_valid_test_config(config)
+    if args.json:
+        print(json.dumps(config, indent=2))
+    else:
+        _print_test_config_summary(config)
+    return 0
+
+
+def run_tests_config_normalize(args: argparse.Namespace) -> int:
+    config = _normalized_test_config(_extract_test_config(_read_json_file(args.file)))
+    _assert_valid_test_config(config)
+    _write_json_output(config, args.output)
+    return 0
+
+
 def run_validate_cli(argv: list[str]) -> int:
     if not argv or argv[0] in {"-h", "--help"}:
         print(_validate_help_text())
@@ -1593,6 +2634,196 @@ def run_wizard_cli(argv: list[str]) -> int:
     raise CliError(f"Unknown wizard subcommand: {command}")
 
 
+def _add_url_run_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument(
+        "--url", default=None, help="Deployed application URL (prompted after twin provisioning when --twins is used)"
+    )
+    parser.add_argument(
+        "--prompt",
+        default=None,
+        help="Natural language instructions for the agent (optional when --scenario or --test-config is provided)",
+    )
+    parser.add_argument("--scenario", default=None, help="Scenario ID to seed twins from")
+    parser.add_argument("--scenario-id", dest="scenario", help=argparse.SUPPRESS)
+    parser.add_argument("--test-config", default=None, help="Path to a TestConfig JSON file")
+    parser.add_argument("--twins", default=None, help="Comma-separated twins to provision before the run")
+    parser.add_argument("--runner-mode", default=None, help="Manual runner mode override")
+    parser.add_argument("--repo", default=None, help="Repository in owner/repo format")
+    parser.add_argument("--branch", default=None, help="Branch associated with this URL run")
+    parser.add_argument("--pr-url", default=None, help="Pull request URL associated with this URL run")
+    parser.add_argument("--email", help="Optional login email")
+    parser.add_argument("--password", help="Optional login password")
+    parser.add_argument("--ttl", type=int, default=None, help="Run duration in minutes")
+    parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+
+
+def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_alias: bool = False) -> None:
+    scenarios_list_parser = subparsers.add_parser("list", help="List your scenarios")
+    scenarios_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_list_parser.add_argument("--include-presets", action="store_true", default=False)
+    scenarios_list_parser.add_argument("--twin", default=None, help="Filter by twin")
+    scenarios_list_parser.add_argument("--tag", default=None, help="Filter by tag")
+    scenarios_list_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_list_parser.set_defaults(func=run_scenarios_list, deprecated_alias=deprecated_alias)
+
+    scenarios_get_parser = subparsers.add_parser("get", help="Get a scenario as JSON")
+    scenarios_get_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_get_parser.add_argument("scenario_id", help="Scenario ID")
+    scenarios_get_parser.set_defaults(func=run_scenarios_get)
+
+    scenarios_create_parser = subparsers.add_parser("create", help="Create a scenario from a prompt")
+    scenarios_create_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_create_parser.add_argument("--name", required=True, help="Scenario name")
+    scenarios_create_parser.add_argument("--prompt", required=True, help="Natural-language twin state")
+    scenarios_create_parser.add_argument("--description", default=None, help="Optional description")
+    scenarios_create_parser.add_argument("--twin", action="append", default=None, help="Restrict to a twin (repeatable)")
+    scenarios_create_parser.add_argument("--tag", action="append", default=None, help="Tag the scenario (repeatable)")
+    scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_create_parser.set_defaults(func=run_scenarios_create, deprecated_alias=deprecated_alias)
+
+    scenarios_import_parser = subparsers.add_parser("import", help="Import a scenario JSON file")
+    scenarios_import_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_import_parser.add_argument("--file", required=True, help="Scenario JSON file")
+    scenarios_import_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_import_parser.set_defaults(func=run_scenarios_import)
+
+    scenarios_export_parser = subparsers.add_parser("export", help="Export a scenario JSON file")
+    scenarios_export_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_export_parser.add_argument("scenario_id", help="Scenario ID")
+    scenarios_export_parser.add_argument("--output", "-o", default=None, help="Output file; defaults to stdout")
+    scenarios_export_parser.set_defaults(func=run_scenarios_export)
+
+    scenarios_update_parser = subparsers.add_parser("update", help="Update a scenario from JSON")
+    scenarios_update_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_update_parser.add_argument("scenario_id", help="Scenario ID")
+    scenarios_update_parser.add_argument("--file", required=True, help="Scenario JSON file")
+    scenarios_update_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_update_parser.set_defaults(func=run_scenarios_update)
+
+    scenarios_delete_parser = subparsers.add_parser("delete", help="Delete a scenario")
+    scenarios_delete_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_delete_parser.add_argument("scenario_id", help="Scenario ID to delete")
+    scenarios_delete_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_delete_parser.set_defaults(func=run_scenarios_delete, deprecated_alias=deprecated_alias)
+
+
+def _add_saved_test_parsers(subparsers: argparse._SubParsersAction) -> None:
+    list_parser = subparsers.add_parser("list", help="List saved tests")
+    list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    list_parser.add_argument("--repo", default=None, help="Filter by repository")
+    list_parser.add_argument("--json", action="store_true", default=False)
+    list_parser.set_defaults(func=run_tests_list)
+
+    get_parser = subparsers.add_parser("get", help="Get a saved test")
+    get_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    get_parser.add_argument("test_id", help="Saved test ID")
+    get_parser.add_argument("--json", action="store_true", default=False)
+    get_parser.set_defaults(func=run_tests_get)
+
+    create_parser = subparsers.add_parser("create", help="Create a saved test")
+    create_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    create_parser.add_argument("--name", required=True, help="Saved test name")
+    create_parser.add_argument("--description", default=None)
+    create_parser.add_argument("--run-id", default=None, help="Source demo runner run ID")
+    create_parser.add_argument("--test-config", default=None, help="TestConfig JSON file")
+    create_parser.add_argument("--prompt", default=None)
+    create_parser.add_argument("--url", default=None, help="Start URL")
+    create_parser.add_argument("--repo", default=None, help="Repository in owner/repo format")
+    create_parser.add_argument("--ci", action="store_true", default=False, help="Enable for CI checks")
+    create_parser.add_argument("--tag", action="append", default=None)
+    create_parser.add_argument("--json", action="store_true", default=False)
+    create_parser.set_defaults(func=run_tests_create)
+
+    import_parser = subparsers.add_parser("import", help="Import a saved test JSON file")
+    import_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    import_parser.add_argument("--file", required=True)
+    import_parser.add_argument("--json", action="store_true", default=False)
+    import_parser.set_defaults(func=run_tests_import)
+
+    export_parser = subparsers.add_parser("export", help="Export a saved test JSON file")
+    export_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    export_parser.add_argument("test_id")
+    export_parser.add_argument("--output", "-o", default=None)
+    export_parser.set_defaults(func=run_tests_export)
+
+    edit_parser = subparsers.add_parser("edit", help="Edit a saved test in $EDITOR")
+    edit_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    edit_parser.add_argument("test_id")
+    edit_parser.add_argument("--json", action="store_true", default=False)
+    edit_parser.set_defaults(func=run_tests_edit)
+
+    delete_parser = subparsers.add_parser("delete", help="Delete a saved test")
+    delete_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    delete_parser.add_argument("test_id")
+    delete_parser.add_argument("--json", action="store_true", default=False)
+    delete_parser.set_defaults(func=run_tests_delete)
+
+    run_parser = subparsers.add_parser("run", help="Run a saved test")
+    run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    run_parser.add_argument("test_id")
+    run_parser.add_argument("--url", default=None, help="Override start URL")
+    run_parser.add_argument("--prompt", default=None, help="Override prompt")
+    run_parser.add_argument("--twins", default=None, help="Comma-separated twins")
+    run_parser.add_argument("--ttl", type=int, default=None)
+    run_parser.add_argument("--session-id", default=None)
+    run_parser.add_argument("--json", action="store_true", default=False)
+    run_parser.set_defaults(func=run_tests_run)
+
+    config_parser = subparsers.add_parser("config", help="Validate and summarize TestConfig files")
+    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
+    validate_parser = config_subparsers.add_parser("validate", help="Validate a TestConfig JSON file")
+    validate_parser.add_argument("--file", required=True)
+    validate_parser.add_argument("--json", action="store_true", default=False)
+    validate_parser.set_defaults(func=run_tests_config_validate)
+    summarize_parser = config_subparsers.add_parser("summarize", help="Summarize a TestConfig JSON file")
+    summarize_parser.add_argument("--file", required=True)
+    summarize_parser.add_argument("--json", action="store_true", default=False)
+    summarize_parser.set_defaults(func=run_tests_config_summarize)
+    normalize_parser = config_subparsers.add_parser("normalize", help="Normalize a TestConfig JSON file")
+    normalize_parser.add_argument("--file", required=True)
+    normalize_parser.add_argument("--output", "-o", default=None)
+    normalize_parser.set_defaults(func=run_tests_config_normalize)
+
+
+def _add_demo_run_parsers(subparsers: argparse._SubParsersAction, *, deprecated_alias: bool = False) -> None:
+    url_parser = subparsers.add_parser("url", help="Run a browser validation against a deployed URL")
+    _add_url_run_arguments(url_parser)
+    url_parser.set_defaults(func=run_test_url, deprecated_alias=deprecated_alias)
+
+    list_parser = subparsers.add_parser("list", help="List recent test runner runs")
+    list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    list_parser.add_argument("--json", action="store_true", default=False)
+    list_parser.set_defaults(func=run_demo_runs_list, deprecated_alias=deprecated_alias)
+
+    get_parser = subparsers.add_parser("get", help="Get a test runner run")
+    get_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    get_parser.add_argument("run_id")
+    get_parser.add_argument("--json", action="store_true", default=False)
+    get_parser.set_defaults(func=run_demo_runs_get)
+
+    logs_parser = subparsers.add_parser("logs", help="Show test runner events")
+    logs_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    logs_parser.add_argument("run_id")
+    logs_parser.add_argument("--json", action="store_true", default=False)
+    logs_parser.set_defaults(func=run_demo_runs_logs)
+
+    rerun_parser = subparsers.add_parser("rerun", help="Rerun a test runner run")
+    rerun_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    rerun_parser.add_argument("run_id")
+    rerun_parser.add_argument("--prompt", default=None)
+    rerun_parser.add_argument("--url", default=None)
+    rerun_parser.add_argument("--json", action="store_true", default=False)
+    rerun_parser.set_defaults(func=run_demo_runs_rerun)
+
+    message_parser = subparsers.add_parser("message", help="Send a message to a live test runner run")
+    message_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    message_parser.add_argument("run_id")
+    message_parser.add_argument("message")
+    message_parser.add_argument("--json", action="store_true", default=False)
+    message_parser.set_defaults(func=run_demo_runs_message)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arga")
     parser.add_argument(
@@ -1614,94 +2845,109 @@ def build_parser() -> argparse.ArgumentParser:
     whoami_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     whoami_parser.set_defaults(func=run_whoami)
 
-    test_parser = subparsers.add_parser("test", help="Start validation runs")
-    test_subparsers = test_parser.add_subparsers(dest="test_command", required=True)
+    previews_parser = subparsers.add_parser("previews", help="Manage preview environments")
+    previews_subparsers = previews_parser.add_subparsers(dest="previews_command", required=True)
 
-    test_url_parser = test_subparsers.add_parser("url", help="Run a browser validation against a deployed URL")
-    test_url_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    test_url_parser.add_argument(
-        "--url", default=None, help="Deployed application URL (prompted after twin provisioning when --twins is used)"
-    )
-    test_url_parser.add_argument(
-        "--prompt",
-        default=None,
-        help="Natural language instructions for the agent (optional when --scenario is provided)",
-    )
-    test_url_parser.add_argument(
-        "--scenario",
-        default=None,
-        help="Scenario ID to seed twins from (obtain via `arga scenarios list` or the web app)",
-    )
-    test_url_parser.add_argument(
-        "--twins",
-        default=None,
-        help="Comma-separated list of digital twins to provision before the run (e.g. slack,stripe). "
-        "Twins are provisioned first, then you deploy your app against them before the validation starts.",
-    )
-    test_url_parser.add_argument("--email", help="Optional login email")
-    test_url_parser.add_argument("--password", help="Optional login password")
-    test_url_parser.add_argument(
-        "--ttl",
-        type=int,
-        default=None,
-        help="Run duration in minutes (Team/Paid: 1-480, default 30; Free: fixed at 10)",
-    )
-    test_url_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    test_url_parser.set_defaults(func=run_test_url)
+    sandboxes_parser = previews_subparsers.add_parser("sandboxes", help="Run sandbox preview environments")
+    sandboxes_subparsers = sandboxes_parser.add_subparsers(dest="sandboxes_command", required=True)
+    sandbox_run_parser = sandboxes_subparsers.add_parser("run", help="Run a sandbox preview for a branch or PR")
+    sandbox_run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    sandbox_run_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
+    sandbox_run_parser.add_argument("--branch", required=True, help="Branch to deploy into the sandbox")
+    sandbox_run_parser.add_argument("--pr-url", default=None, help="Pull request URL when this sandbox is PR-backed")
+    sandbox_run_parser.add_argument("--frontend-url", default=None, help="Frontend URL to validate after deploy")
+    sandbox_run_parser.add_argument("--context-notes", default=None, help="Additional sandbox instructions")
+    sandbox_run_parser.add_argument("--scenario-prompt", default=None, help="Scenario seed prompt for twins")
+    sandbox_run_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
+    sandbox_run_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
+    sandbox_run_parser.add_argument("--session-id", default=None, help="Reuse an existing validation session")
+    sandbox_run_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    sandbox_run_parser.set_defaults(func=run_previews_sandbox_run)
 
-    scenarios_parser = subparsers.add_parser("scenarios", help="Manage twin seed scenarios")
+    pr_checks_parser = previews_subparsers.add_parser("pr-checks", help="Run and configure PR checks")
+    pr_checks_subparsers = pr_checks_parser.add_subparsers(dest="pr_checks_command", required=True)
+    pr_checks_run_parser = pr_checks_subparsers.add_parser("run", help="Run a PR check")
+    pr_checks_run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    pr_checks_run_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
+    pr_checks_run_parser.add_argument("--pr-url", default=None, help="Pull request URL")
+    pr_checks_run_parser.add_argument("--pr", type=int, default=None, help="Pull request number")
+    pr_checks_run_parser.add_argument("--branch", default=None, help="Branch to validate")
+    pr_checks_run_parser.add_argument("--frontend-url", default=None, help="Frontend URL to validate")
+    pr_checks_run_parser.add_argument("--context-notes", default=None, help="Additional instructions")
+    pr_checks_run_parser.add_argument("--scenario-prompt", default=None, help="Scenario seed prompt for twins")
+    pr_checks_run_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
+    pr_checks_run_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
+    pr_checks_run_parser.add_argument("--session-id", default=None, help="Reuse an existing validation session")
+    pr_checks_run_parser.add_argument("--run-type", default="pr_run", choices=("pr_run", "agent_run"))
+    pr_checks_run_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    pr_checks_run_parser.set_defaults(func=run_validate_pr)
+    pr_checks_install_parser = pr_checks_subparsers.add_parser("install", help="Install automatic PR checks")
+    pr_checks_install_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    pr_checks_install_parser.add_argument("repo", help="Repository in owner/repo format")
+    pr_checks_install_parser.set_defaults(func=run_validate_install)
+    pr_checks_config_parser = pr_checks_subparsers.add_parser("config", help="Show PR check config")
+    pr_checks_config_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    pr_checks_config_parser.add_argument("repo", help="Repository in owner/repo format")
+    pr_checks_config_parser.set_defaults(func=run_validate_config)
+    pr_checks_config_set_parser = pr_checks_subparsers.add_parser("config-set", help="Save PR check config")
+    pr_checks_config_set_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    pr_checks_config_set_parser.add_argument("repo", help="Repository in owner/repo format")
+    pr_checks_config_set_parser.add_argument("--trigger", choices=("pr", "branch"), help="Validation trigger mode")
+    pr_checks_config_set_parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
+    pr_checks_config_set_parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
+    pr_checks_config_set_parser.set_defaults(func=run_validate_config_set)
+
+    twins_parser = previews_subparsers.add_parser("twins", help="Provision twins")
+    twins_subparsers = twins_parser.add_subparsers(dest="twins_command", required=True)
+    twins_provision_parser = twins_subparsers.add_parser("provision", help="Provision one or more twins")
+    twins_provision_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_provision_parser.add_argument("--twins", required=True, help="Comma-separated twins, e.g. jira,slack")
+    twins_provision_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
+    twins_provision_parser.add_argument("--scenario-prompt", default=None, help="Scenario prompt to seed twins")
+    twins_provision_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
+    twins_provision_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
+    twins_provision_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_provision_parser.set_defaults(func=run_twins_provision)
+    twins_status_parser = twins_subparsers.add_parser("status", help="Show twin provisioning status")
+    twins_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_status_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_status_parser.set_defaults(func=run_twins_status)
+
+    test_runner_parser = subparsers.add_parser("test-runner", help="Manage scenarios, saved tests, and test runs")
+    test_runner_subparsers = test_runner_parser.add_subparsers(dest="test_runner_command", required=True)
+
+    scenarios_parser = test_runner_subparsers.add_parser("scenarios", help="Manage twin seed scenarios")
     scenarios_subparsers = scenarios_parser.add_subparsers(dest="scenarios_command", required=True)
+    _add_scenario_parsers(scenarios_subparsers)
 
-    scenarios_list_parser = scenarios_subparsers.add_parser("list", help="List your scenarios")
-    scenarios_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    scenarios_list_parser.add_argument(
-        "--include-presets",
-        action="store_true",
-        default=False,
-        help="Also include built-in preset scenarios",
-    )
-    scenarios_list_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
-    scenarios_list_parser.set_defaults(func=run_scenarios_list)
+    tests_parser = test_runner_subparsers.add_parser("tests", help="Manage saved browser tests")
+    tests_subparsers = tests_parser.add_subparsers(dest="tests_command", required=True)
+    _add_saved_test_parsers(tests_subparsers)
 
-    scenarios_create_parser = scenarios_subparsers.add_parser(
-        "create", help="Create a scenario from a natural-language prompt"
-    )
-    scenarios_create_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    scenarios_create_parser.add_argument("--name", required=True, help="Scenario name")
-    scenarios_create_parser.add_argument(
-        "--prompt",
-        required=True,
-        help="Natural-language description of the desired twin state (LLM generates seed_config)",
-    )
-    scenarios_create_parser.add_argument("--description", default=None, help="Optional description")
-    scenarios_create_parser.add_argument(
-        "--twin",
-        action="append",
-        default=None,
-        help="Restrict to specific twin(s) (repeatable). Inferred from prompt if omitted.",
-    )
-    scenarios_create_parser.add_argument("--tag", action="append", default=None, help="Tag the scenario (repeatable)")
-    scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
-    scenarios_create_parser.set_defaults(func=run_scenarios_create)
+    demo_runs_parser = test_runner_subparsers.add_parser("runs", help="Run and inspect live browser tests")
+    demo_runs_subparsers = demo_runs_parser.add_subparsers(dest="demo_runs_command", required=True)
+    _add_demo_run_parsers(demo_runs_subparsers)
 
-    scenarios_delete_parser = scenarios_subparsers.add_parser("delete", help="Delete a scenario")
-    scenarios_delete_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    scenarios_delete_parser.add_argument("scenario_id", help="Scenario ID to delete")
-    scenarios_delete_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
-    scenarios_delete_parser.set_defaults(func=run_scenarios_delete)
+    test_parser = subparsers.add_parser("test", help="Deprecated alias for test-runner runs")
+    test_subparsers = test_parser.add_subparsers(dest="test_command", required=True)
+    test_url_parser = test_subparsers.add_parser("url", help="Deprecated alias for test-runner runs url")
+    _add_url_run_arguments(test_url_parser)
+    test_url_parser.set_defaults(func=run_test_url, deprecated_alias=True)
 
-    validate_parser = subparsers.add_parser("validate", help="Start PR or URL validation runs")
+    scenarios_alias_parser = subparsers.add_parser("scenarios", help="Deprecated alias for test-runner scenarios")
+    scenarios_alias_subparsers = scenarios_alias_parser.add_subparsers(dest="scenarios_command", required=True)
+    _add_scenario_parsers(scenarios_alias_subparsers, deprecated_alias=True)
+
+    validate_parser = subparsers.add_parser("validate", help="Deprecated alias for previews pr-checks")
     validate_subparsers = validate_parser.add_subparsers(dest="validate_command", required=True)
-
-    validate_pr_parser = validate_subparsers.add_parser("pr", help="Run PR validation")
+    validate_pr_parser = validate_subparsers.add_parser("pr", help="Deprecated alias for previews pr-checks run")
     validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
-    validate_pr_parser.add_argument(
-        "--context-notes", default=None, help="Additional instructions or context for the validation"
-    )
+    validate_pr_parser.add_argument("--context-notes", default=None, help="Additional instructions or context")
     validate_pr_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    validate_pr_parser.set_defaults(func=run_validate_pr)
+    validate_pr_parser.set_defaults(func=run_validate_pr, deprecated_alias=True)
 
     mcp_parser = subparsers.add_parser("mcp", help="Manage MCP integrations")
     mcp_subparsers = mcp_parser.add_subparsers(dest="mcp_command", required=True)
