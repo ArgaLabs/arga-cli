@@ -55,6 +55,12 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.github.com", "github.com"],
         "show_in_ui": True,
     },
+    "linkedin": {
+        "label": "LinkedIn",
+        "port": 12123,
+        "intercept_domains": ["api.linkedin.com", "www.linkedin.com", "linkedin.com", "media.licdn.com"],
+        "show_in_ui": True,
+    },
     "unstructured": {
         "label": "Unstructured",
         "port": 12118,
@@ -158,6 +164,20 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "url_vars": ["GITHUB_API_URL", "GITHUB_BASE_URL"],
         "secret_vars": [],
         "defaults": {"GITHUB_TOKEN": "ghp_test-github-twin-token"},
+    },
+    "linkedin": {
+        "token_vars": [
+            "LINKEDIN_ACCESS_TOKEN",
+            "LINKEDIN_TOKEN",
+            "LINKEDIN_CLIENT_ID",
+            "LINKEDIN_CLIENT_SECRET",
+        ],
+        "url_vars": ["LINKEDIN_API_URL", "LINKEDIN_BASE_URL", "LINKEDIN_TWIN_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "LINKEDIN_CLIENT_ID": "linkedin-twin-client",
+            "LINKEDIN_CLIENT_SECRET": "linkedin-twin-secret",
+        },
     },
     "box": {
         "token_vars": ["BOX_CLIENT_ID", "BOX_CLIENT_SECRET", "BOX_DEVELOPER_TOKEN", "BOX_ACCESS_TOKEN"],
@@ -280,6 +300,15 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "dropbox-twin-app-key",
         "confidence": "high",
     },
+    # LinkedIn
+    {
+        "twin": "linkedin",
+        "label": "LinkedIn access token (AQ...)",
+        "pattern": r"^AQ[A-Za-z0-9_-]+",
+        "category": "token",
+        "default_value": "",
+        "confidence": "medium",
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -320,6 +349,12 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         'Organization: "test-org" (Test Organization)',
         'Repository: "test-org/demo-repo" (public, Python)',
         "Token: ghp_test-github-twin-token",
+    ],
+    "linkedin": [
+        "Starts empty by default",
+        "Scenario seeding creates members, people search data, posts, and OAuth tokens",
+        "Client ID: linkedin-twin-client",
+        "Client secret: linkedin-twin-secret",
     ],
     "unstructured": [
         "Partition endpoint: /general/v0/general",
