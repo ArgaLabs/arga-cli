@@ -60,7 +60,9 @@ def test_test_runner_tests_run_uses_saved_test_endpoint(monkeypatch, capsys) -> 
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "get_me", lambda self: {"billing_plan": "team"})
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
-    monkeypatch.setattr(provision, "provision_twins", lambda *args, **kwargs: {"run_id": "provision_1", "status": "ready"})
+    monkeypatch.setattr(
+        provision, "provision_twins", lambda *args, **kwargs: {"run_id": "provision_1", "status": "ready"}
+    )
     monkeypatch.setattr("builtins.input", lambda: "")
     captured: dict[str, object] = {}
 
@@ -135,9 +137,7 @@ def test_config_validate_rejects_ambiguous_assertion(tmp_path, capsys) -> None:
         )
     )
 
-    args = main.build_parser().parse_args(
-        ["test-runner", "tests", "config", "validate", "--file", str(config_path)]
-    )
+    args = main.build_parser().parse_args(["test-runner", "tests", "config", "validate", "--file", str(config_path)])
     exit_code = args.func(args)
     output = capsys.readouterr().out
 
@@ -214,3 +214,41 @@ def test_previews_sandbox_run_uses_agent_run(monkeypatch, capsys) -> None:
     assert captured["twins"] == ["slack"]
     assert captured["run_type"] == "agent_run"
     assert "Sandbox preview started." in output
+
+
+def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured: dict[str, object] = {}
+
+    def fake_provision(self, *, twins: list[str], ttl_minutes: int, scenario_prompt: str | None = None):
+        captured.update({"twins": twins, "ttl_minutes": ttl_minutes, "scenario_prompt": scenario_prompt})
+        return {"run_id": "linear_run", "status": "queued"}
+
+    monkeypatch.setattr(main.ApiClient, "provision_twins_start", fake_provision)
+
+    args = main.build_parser().parse_args(
+        [
+            "previews",
+            "twins",
+            "provision",
+            "--twins",
+            "linear",
+            "--ttl",
+            "30",
+            "--scenario-prompt",
+            "seed Linear issues and project updates",
+        ]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {
+        "twins": ["linear"],
+        "ttl_minutes": 30,
+        "scenario_prompt": "seed Linear issues and project updates",
+    }
+    assert "Twin provisioning started." in output
+    assert "Run ID: linear_run" in output
