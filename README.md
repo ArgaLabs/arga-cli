@@ -70,13 +70,13 @@ arga previews pr-checks run --repo arga-labs/validation-server --pr 182
 Run a sandbox preview for a branch:
 
 ```bash
-arga previews sandboxes run --repo arga-labs/app --branch feature/demo --twins slack,jira
+arga previews sandboxes run --repo arga-labs/app --branch feature/demo --twins slack,jira,linear
 ```
 
 Provision twins directly:
 
 ```bash
-arga previews twins provision --twins slack,jira --ttl 60 --wait
+arga previews twins provision --twins linear --ttl 60 --wait
 ```
 
 Create and run saved tests:
@@ -137,7 +137,7 @@ arga logout
 ```bash
 arga previews sandboxes run --repo arga-labs/app --branch feature/demo
 arga previews pr-checks run --repo arga-labs/validation-server --pr 182
-arga previews twins provision --twins slack,jira --ttl 60 --wait
+arga previews twins provision --twins slack,jira,linear --ttl 60 --wait
 arga previews twins status <run_id>
 arga previews pr-checks install arga-labs/validation-server
 arga previews pr-checks config arga-labs/validation-server
