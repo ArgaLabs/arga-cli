@@ -2901,7 +2901,7 @@ def build_parser() -> argparse.ArgumentParser:
     twins_subparsers = twins_parser.add_subparsers(dest="twins_command", required=True)
     twins_provision_parser = twins_subparsers.add_parser("provision", help="Provision one or more twins")
     twins_provision_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_provision_parser.add_argument("--twins", required=True, help="Comma-separated twins, e.g. jira,slack")
+    twins_provision_parser.add_argument("--twins", required=True, help="Comma-separated twins, e.g. gitlab,jira,slack")
     twins_provision_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
     twins_provision_parser.add_argument("--scenario-prompt", default=None, help="Scenario prompt to seed twins")
     twins_provision_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
