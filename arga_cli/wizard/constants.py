@@ -97,6 +97,12 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["atlassian.net", "auth.atlassian.com", "api.atlassian.com"],
         "show_in_ui": True,
     },
+    "linear": {
+        "label": "Linear",
+        "port": 12126,
+        "intercept_domains": ["api.linear.app", "linear.app"],
+        "show_in_ui": True,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -216,6 +222,12 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "secret_vars": ["ATLASSIAN_CLIENT_ID", "ATLASSIAN_CLIENT_SECRET"],
         "defaults": {"JIRA_API_TOKEN": "jira_default_seed_token"},
     },
+    "linear": {
+        "token_vars": ["LINEAR_API_KEY", "LINEAR_ACCESS_TOKEN", "LINEAR_TOKEN"],
+        "url_vars": ["LINEAR_API_URL", "LINEAR_BASE_URL", "LINEAR_GRAPHQL_URL"],
+        "secret_vars": ["LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
+        "defaults": {"LINEAR_API_KEY": "lin_api_twin_owner_personal_key_0001"},
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -309,6 +321,23 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "",
         "confidence": "medium",
     },
+    # Linear
+    {
+        "twin": "linear",
+        "label": "Linear personal API key (lin_api_...)",
+        "pattern": r"^lin_api_",
+        "category": "token",
+        "default_value": "lin_api_twin_owner_personal_key_0001",
+        "confidence": "high",
+    },
+    {
+        "twin": "linear",
+        "label": "Linear OAuth token (lin_oauth_...)",
+        "pattern": r"^lin_oauth_",
+        "category": "token",
+        "default_value": "lin_api_twin_owner_personal_key_0001",
+        "confidence": "high",
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -384,5 +413,12 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         "Statuses: To Do, In Progress, Done",
         "Users: Test User (user001), Second User (user002)",
         "Token: jira_default_seed_token",
+    ],
+    "linear": [
+        'Workspace: "Linear Twin Workspace"',
+        'Team: "Engineering" (ENG)',
+        "Resources: issues, projects, initiatives, documents, milestones, comments",
+        "GraphQL endpoint: /graphql",
+        "Token: lin_api_twin_owner_personal_key_0001",
     ],
 }
