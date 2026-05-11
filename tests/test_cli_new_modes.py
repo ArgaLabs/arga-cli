@@ -252,3 +252,41 @@ def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
     }
     assert "Twin provisioning started." in output
     assert "Run ID: linear_run" in output
+
+
+def test_twins_provision_accepts_gitlab(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured: dict[str, object] = {}
+
+    def fake_provision(self, *, twins: list[str], ttl_minutes: int, scenario_prompt: str | None = None):
+        captured.update({"twins": twins, "ttl_minutes": ttl_minutes, "scenario_prompt": scenario_prompt})
+        return {"run_id": "gitlab_run", "status": "queued"}
+
+    monkeypatch.setattr(main.ApiClient, "provision_twins_start", fake_provision)
+
+    args = main.build_parser().parse_args(
+        [
+            "previews",
+            "twins",
+            "provision",
+            "--twins",
+            "gitlab",
+            "--ttl",
+            "30",
+            "--scenario-prompt",
+            "seed GitLab projects and merge requests",
+        ]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {
+        "twins": ["gitlab"],
+        "ttl_minutes": 30,
+        "scenario_prompt": "seed GitLab projects and merge requests",
+    }
+    assert "Twin provisioning started." in output
+    assert "Run ID: gitlab_run" in output

@@ -55,6 +55,12 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.github.com", "github.com"],
         "show_in_ui": True,
     },
+    "gitlab": {
+        "label": "GitLab",
+        "port": 12127,
+        "intercept_domains": ["gitlab.com"],
+        "show_in_ui": True,
+    },
     "linkedin": {
         "label": "LinkedIn",
         "port": 12123,
@@ -170,6 +176,34 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "url_vars": ["GITHUB_API_URL", "GITHUB_BASE_URL"],
         "secret_vars": [],
         "defaults": {"GITHUB_TOKEN": "ghp_test-github-twin-token"},
+    },
+    "gitlab": {
+        "token_vars": [
+            "GITLAB_TOKEN",
+            "GITLAB_PRIVATE_TOKEN",
+            "GITLAB_ACCESS_TOKEN",
+            "GITLAB_API_TOKEN",
+            "GL_TOKEN",
+            "CI_JOB_TOKEN",
+        ],
+        "url_vars": [
+            "GITLAB_API_URL",
+            "GITLAB_BASE_URL",
+            "GITLAB_URL",
+            "GITLAB_HOST",
+            "CI_SERVER_URL",
+            "GITLAB_GRAPHQL_URL",
+            "GITLAB_MCP_URL",
+        ],
+        "secret_vars": [],
+        "defaults": {
+            "GITLAB_TOKEN": "glpat-gitlab-twin-token",
+            "GITLAB_PRIVATE_TOKEN": "glpat-gitlab-twin-token",
+            "GITLAB_ACCESS_TOKEN": "glpat-gitlab-twin-token",
+            "GITLAB_API_TOKEN": "glpat-gitlab-twin-token",
+            "GL_TOKEN": "glpat-gitlab-twin-token",
+            "CI_JOB_TOKEN": "glpat-gitlab-twin-token",
+        },
     },
     "linkedin": {
         "token_vars": [
@@ -321,6 +355,15 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "",
         "confidence": "medium",
     },
+    # GitLab
+    {
+        "twin": "gitlab",
+        "label": "GitLab token (glpat-/glrt-/gldt-/glsoat-/gloas-...)",
+        "pattern": r"^gl(?:pat|rt|dt|soat|oas)-",
+        "category": "token",
+        "default_value": "glpat-gitlab-twin-token",
+        "confidence": "high",
+    },
     # Linear
     {
         "twin": "linear",
@@ -378,6 +421,13 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         'Organization: "test-org" (Test Organization)',
         'Repository: "test-org/demo-repo" (public, Python)',
         "Token: ghp_test-github-twin-token",
+    ],
+    "gitlab": [
+        'User: "root" (Administrator)',
+        'Group: "twins"',
+        'Project: "twins/gitlab-demo"',
+        "Resources: repository files, issues, merge requests, pipelines, jobs, hooks, MCP tools",
+        "Token: glpat-gitlab-twin-token",
     ],
     "linkedin": [
         "Starts empty by default",
