@@ -328,10 +328,15 @@ class ApiClient:
         twins: list[str],
         ttl_minutes: int,
         scenario_prompt: str | None = None,
+        scenario_id: str | None = None,
+        public: bool = True,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"twins": twins, "ttl_minutes": ttl_minutes, "scenario": "quickstart"}
         if scenario_prompt:
             payload["scenario_prompt"] = scenario_prompt
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
+        payload["public"] = public
         response = self._client.post(
             f"{self._api_url}/validate/twins/provision",
             json=payload,
@@ -339,12 +344,44 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to provision twins")
 
+    def list_twins(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/validate/twins",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list twins")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /validate/twins")
+        return payload
+
     def get_twin_provision_status(self, run_id: str) -> dict[str, Any]:
         response = self._client.get(
             f"{self._api_url}/validate/twins/provision/{run_id}/status",
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to load twin provision status")
+
+    def extend_twin_provision(self, run_id: str, *, ttl_minutes: int) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/extend",
+            json={"ttl_minutes": ttl_minutes},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to extend twin provision")
+
+    def teardown_twin_provision(self, run_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/teardown",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to tear down twin provision")
+
+    def lock_twin_provision(self, run_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/lock",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to lock twin provision")
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         response = self._client.get(
@@ -1161,6 +1198,8 @@ def run_twins_provision(args: argparse.Namespace) -> int:
             twins=twins,
             ttl_minutes=ttl_minutes or 30,
             scenario_prompt=getattr(args, "scenario_prompt", None),
+            scenario_id=getattr(args, "scenario_id", None),
+            public=not getattr(args, "private", False),
         )
         run_id = str(status.get("run_id") or "")
         if not run_id:
@@ -1187,6 +1226,38 @@ def run_twins_provision(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_twins_list(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        twins = client.list_twins()
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(twins, indent=2))
+        return 0
+
+    headers = ["NAME", "LABEL", "KIND", "VISIBLE"]
+    rows = [
+        [
+            str(item.get("name") or "-"),
+            str(item.get("label") or "-"),
+            str(item.get("kind") or "-"),
+            "yes" if bool(item.get("show_in_ui", True)) else "no",
+        ]
+        for item in twins
+    ]
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+    return 0
+
+
 def run_twins_status(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
@@ -1203,6 +1274,62 @@ def run_twins_status(args: argparse.Namespace) -> int:
     print(f"Status: {status.get('status', 'unknown')}")
     if status.get("status") == "ready":
         _print_twin_env_vars(status)
+    return 0
+
+
+def run_twins_extend(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        ttl_minutes = _resolve_ttl(client, args.ttl)
+        if ttl_minutes is None:
+            raise CliError("--ttl is required.")
+        payload = client.extend_twin_provision(args.run_id, ttl_minutes=ttl_minutes)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"Run ID: {args.run_id}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    print(f"TTL minutes: {payload.get('ttl_minutes', ttl_minutes)}")
+    return 0
+
+
+def run_twins_teardown(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.teardown_twin_provision(args.run_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"Run ID: {payload.get('run_id', args.run_id)}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    return 0
+
+
+def run_twins_lock(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.lock_twin_provision(args.run_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"Run ID: {payload.get('run_id', args.run_id)}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    print(f"Public access: {'on' if bool(payload.get('is_public', True)) else 'off'}")
     return 0
 
 
@@ -2897,13 +3024,24 @@ def build_parser() -> argparse.ArgumentParser:
     pr_checks_config_set_parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
     pr_checks_config_set_parser.set_defaults(func=run_validate_config_set)
 
-    twins_parser = previews_subparsers.add_parser("twins", help="Provision twins")
+    twins_parser = previews_subparsers.add_parser("twins", help="Manage twin provisioning")
     twins_subparsers = twins_parser.add_subparsers(dest="twins_command", required=True)
+    twins_list_parser = twins_subparsers.add_parser("list", help="List available twins")
+    twins_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_list_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_list_parser.set_defaults(func=run_twins_list)
     twins_provision_parser = twins_subparsers.add_parser("provision", help="Provision one or more twins")
     twins_provision_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     twins_provision_parser.add_argument("--twins", required=True, help="Comma-separated twins, e.g. jira,slack")
     twins_provision_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
+    twins_provision_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
     twins_provision_parser.add_argument("--scenario-prompt", default=None, help="Scenario prompt to seed twins")
+    twins_provision_parser.add_argument(
+        "--private",
+        action="store_true",
+        default=False,
+        help="Keep twins behind proxy auth instead of using public base URLs",
+    )
     twins_provision_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
     twins_provision_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
     twins_provision_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
@@ -2913,6 +3051,22 @@ def build_parser() -> argparse.ArgumentParser:
     twins_status_parser.add_argument("run_id", help="Twin provisioning run ID")
     twins_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     twins_status_parser.set_defaults(func=run_twins_status)
+    twins_extend_parser = twins_subparsers.add_parser("extend", help="Extend a twin provisioning session")
+    twins_extend_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_extend_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_extend_parser.add_argument("--ttl", type=int, required=True, help="New TTL in minutes")
+    twins_extend_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_extend_parser.set_defaults(func=run_twins_extend)
+    twins_teardown_parser = twins_subparsers.add_parser("teardown", help="Tear down a twin provisioning session")
+    twins_teardown_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_teardown_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_teardown_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_teardown_parser.set_defaults(func=run_twins_teardown)
+    twins_lock_parser = twins_subparsers.add_parser("lock", help="Disable public access for a twin session")
+    twins_lock_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_lock_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_lock_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_lock_parser.set_defaults(func=run_twins_lock)
 
     test_runner_parser = subparsers.add_parser("test-runner", help="Manage scenarios, saved tests, and test runs")
     test_runner_subparsers = test_runner_parser.add_subparsers(dest="test_runner_command", required=True)
