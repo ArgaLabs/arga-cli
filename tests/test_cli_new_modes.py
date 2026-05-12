@@ -90,9 +90,10 @@ def test_twin_lifecycle_api_methods_use_supported_validation_server_routes(monke
             public=False,
         )
         client.get_twin_provision_status("run_123")
-        client.extend_twin_provision("run_123", ttl_minutes=75)
-        client.teardown_twin_provision("run_123")
-        client.lock_twin_provision("run_123")
+        client.reset_twins("run_123")
+        client.extend_twins("run_123", ttl_minutes=75)
+        client.teardown_twins("run_123")
+        client.lock_twins("run_123")
     finally:
         client.close()
 
@@ -111,6 +112,7 @@ def test_twin_lifecycle_api_methods_use_supported_validation_server_routes(monke
             },
         ),
         ("GET", "https://api.argalabs.com/validate/twins/provision/run_123/status", None),
+        ("POST", "https://api.argalabs.com/validate/twins/provision/run_123/reset", None),
         (
             "POST",
             "https://api.argalabs.com/validate/twins/provision/run_123/extend",
@@ -338,6 +340,61 @@ def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
     assert "Twin provisioning started." in output
     assert "Run ID: linear_run" in output
 
+def test_twins_provision_accepts_gitlab(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured: dict[str, object] = {}
+
+    def fake_provision(
+        self,
+        *,
+        twins: list[str],
+        ttl_minutes: int,
+        scenario_prompt: str | None = None,
+        scenario_id: str | None = None,
+        public: bool = True,
+    ):
+        captured.update(
+            {
+                "twins": twins,
+                "ttl_minutes": ttl_minutes,
+                "scenario_prompt": scenario_prompt,
+                "scenario_id": scenario_id,
+                "public": public,
+            }
+        )
+        return {"run_id": "gitlab_run", "status": "queued"}
+
+    monkeypatch.setattr(main.ApiClient, "provision_twins_start", fake_provision)
+
+    args = main.build_parser().parse_args(
+        [
+            "previews",
+            "twins",
+            "provision",
+            "--twins",
+            "gitlab",
+            "--ttl",
+            "30",
+            "--scenario-prompt",
+            "seed GitLab projects and merge requests",
+        ]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {
+        "twins": ["gitlab"],
+        "ttl_minutes": 30,
+        "scenario_prompt": "seed GitLab projects and merge requests",
+        "scenario_id": None,
+        "public": True,
+    }
+    assert "Twin provisioning started." in output
+    assert "Run ID: gitlab_run" in output
+
 
 def test_twins_provision_supports_private_and_scenario_id(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
@@ -418,6 +475,96 @@ def test_twins_list_prints_catalog(monkeypatch, capsys) -> None:
     assert "no" in output
 
 
+def test_twins_reset_hits_api(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, object] = {}
+
+    def fake_reset(self, run_id: str):
+        captured["run_id"] = run_id
+        return {
+            "run_id": run_id,
+            "status": "reset_complete",
+            "baseline_kind": "empty",
+            "factory_reset": {},
+            "seed_results": {},
+        }
+
+    monkeypatch.setattr(main.ApiClient, "reset_twins", fake_reset)
+
+    args = main.build_parser().parse_args(["previews", "twins", "reset", "run_xyz"])
+    exit_code = args.func(args)
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured["run_id"] == "run_xyz"
+    assert "reset_complete" in out
+
+
+def test_twins_mcp_config_prints_capable_twin_config(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    def fake_status(self, run_id: str):
+        return {
+            "run_id": run_id,
+            "status": "ready",
+            "twins": {
+                "slack": {
+                    "mcp_url": "https://pub-r1--slack.sandbox.argalabs.com/mcp",
+                    "mcp": {"url": "https://pub-r1--slack.sandbox.argalabs.com/mcp"},
+                },
+                "linear": {},
+            },
+        }
+
+    monkeypatch.setattr(main.ApiClient, "get_twin_provision_status", fake_status)
+
+    args = main.build_parser().parse_args(
+        ["previews", "twins", "mcp-config", "run_xyz", "--twin", "slack", "--token", "xoxp-test"]
+    )
+    exit_code = args.func(args)
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    payload = json.loads(out)
+    assert payload["mcpServers"]["arga-twin-slack"]["url"] == "https://pub-r1--slack.sandbox.argalabs.com/mcp"
+    assert payload["mcpServers"]["arga-twin-slack"]["headers"]["Authorization"] == "Bearer xoxp-test"
+
+
+def test_twins_mcp_config_install_merges_detected_targets(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    (tmp_path / ".cursor").mkdir()
+    from arga_cli import mcp
+
+    install_from_config = mcp.install_mcp_configuration_from_config
+
+    def fake_status(self, run_id: str):
+        return {
+            "run_id": run_id,
+            "status": "ready",
+            "twins": {
+                "gitlab": {
+                    "mcp_url": "https://pub-r1--gitlab.sandbox.argalabs.com/api/v4/mcp",
+                }
+            },
+        }
+
+    def fake_install(config):
+        return install_from_config(config, home=tmp_path, echo=lambda _line: None)
+
+    monkeypatch.setattr(main.ApiClient, "get_twin_provision_status", fake_status)
+    monkeypatch.setattr("arga_cli.mcp.install_mcp_configuration_from_config", fake_install)
+
+    args = main.build_parser().parse_args(["previews", "twins", "mcp-config", "run_xyz", "--install"])
+    exit_code = args.func(args)
+
+    assert exit_code == 0
+    installed = json.loads((tmp_path / ".cursor" / "mcp.json").read_text())
+    assert installed["mcpServers"]["arga-twin-gitlab"]["url"].endswith("/api/v4/mcp")
+
+
 def test_twins_extend_uses_api_ttl(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
@@ -428,7 +575,7 @@ def test_twins_extend_uses_api_ttl(monkeypatch, capsys) -> None:
         captured.update({"run_id": run_id, "ttl_minutes": ttl_minutes})
         return {"status": "extended", "ttl_minutes": ttl_minutes}
 
-    monkeypatch.setattr(main.ApiClient, "extend_twin_provision", fake_extend)
+    monkeypatch.setattr(main.ApiClient, "extend_twins", fake_extend)
 
     args = main.build_parser().parse_args(["previews", "twins", "extend", "run_123", "--ttl", "90"])
     exit_code = args.func(args)
@@ -444,12 +591,12 @@ def test_twins_teardown_and_lock_commands(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     monkeypatch.setattr(
         main.ApiClient,
-        "teardown_twin_provision",
+        "teardown_twins",
         lambda self, run_id: {"run_id": run_id, "status": "cleaning_up"},
     )
     monkeypatch.setattr(
         main.ApiClient,
-        "lock_twin_provision",
+        "lock_twins",
         lambda self, run_id: {"run_id": run_id, "status": "locked", "is_public": False},
     )
 

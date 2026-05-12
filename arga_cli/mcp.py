@@ -123,3 +123,39 @@ def install_mcp_configuration(
             failures += 1
 
     return installed, failures
+
+
+def install_mcp_configuration_from_config(
+    mcp_config: dict[str, object],
+    *,
+    home: Path | None = None,
+    echo: Callable[[str], None] = print,
+) -> tuple[int, int]:
+    detected = detect_installed_targets(home)
+
+    echo("Detected:")
+    if not detected:
+        echo("No supported IDE agents detected.")
+        return 0, 0
+
+    for target in detected:
+        echo(f"✓ {target.label}")
+
+    echo("")
+    echo("Installing MCP configuration...")
+    echo("")
+
+    installed = 0
+    failures = 0
+    for target in detected:
+        try:
+            existing = load_existing_config(target.config_path)
+            merged = merge_mcp_config(existing, mcp_config)
+            write_mcp_config(target.config_path, merged)
+            echo(f"✓ {target.label} configured")
+            installed += 1
+        except ValueError as exc:
+            echo(f"✗ {target.label} not configured: {exc}")
+            failures += 1
+
+    return installed, failures
