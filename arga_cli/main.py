@@ -346,6 +346,28 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to load twin provision status")
 
+    def reset_twins(self, run_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/reset",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to reset twins")
+
+    def extend_twins(self, run_id: str, *, ttl_minutes: int = 60) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/extend",
+            json={"ttl_minutes": ttl_minutes},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to extend twin provision TTL")
+
+    def teardown_twins(self, run_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/twins/provision/{run_id}/teardown",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to tear down twins")
+
     def get_run(self, run_id: str) -> dict[str, Any]:
         response = self._client.get(
             f"{self._api_url}/runs/{run_id}",
@@ -965,6 +987,33 @@ def _print_twin_env_vars(status: dict) -> None:
         print()
 
 
+def _twin_mcp_entries(status: dict, *, twin: str | None = None, token: str | None = None) -> dict[str, Any]:
+    servers: dict[str, Any] = {}
+    for name, info in sorted((status.get("twins") or {}).items()):
+        if twin and name != twin:
+            continue
+        if not isinstance(info, dict):
+            continue
+        mcp = info.get("mcp") if isinstance(info.get("mcp"), dict) else {}
+        mcp_url = mcp.get("url") or info.get("mcp_url")
+        if not mcp_url:
+            continue
+        server_key = f"arga-twin-{name}"
+        server_config: dict[str, Any] = {"url": mcp_url}
+        if token:
+            server_config["headers"] = {"Authorization": f"Bearer {token}"}
+        servers[server_key] = server_config
+    return {"mcpServers": servers}
+
+
+def _print_twin_mcp_config(config: dict[str, Any]) -> None:
+    servers = config.get("mcpServers") if isinstance(config.get("mcpServers"), dict) else {}
+    if not servers:
+        print("No MCP-capable twins found for this provision.")
+        return
+    print(json.dumps(config, indent=2))
+
+
 def run_test_url(args: argparse.Namespace) -> int:
     _warn_deprecated_alias(args, "arga test-runner runs url")
     if bool(args.email) != bool(args.password):
@@ -1203,6 +1252,91 @@ def run_twins_status(args: argparse.Namespace) -> int:
     print(f"Status: {status.get('status', 'unknown')}")
     if status.get("status") == "ready":
         _print_twin_env_vars(status)
+    return 0
+
+
+def run_twins_mcp_config(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        status = client.get_twin_provision_status(args.run_id)
+    finally:
+        client.close()
+
+    if status.get("status") != "ready":
+        raise CliError(f"Twin provision {args.run_id} is not ready (status: {status.get('status', 'unknown')}).")
+
+    config = _twin_mcp_entries(status, twin=getattr(args, "twin", None), token=getattr(args, "token", None))
+    servers = config.get("mcpServers") if isinstance(config.get("mcpServers"), dict) else {}
+    if not servers:
+        target = f" for twin {args.twin}" if getattr(args, "twin", None) else ""
+        raise CliError(f"No MCP-capable twins found{target}.")
+
+    if getattr(args, "install", False):
+        from arga_cli import mcp as mcp_config
+
+        installed, failures = mcp_config.install_mcp_configuration_from_config(config)
+        if failures:
+            raise CliError(f"Failed to install twin MCP config for {failures} target(s).")
+        if installed == 0:
+            print("No supported IDE agents detected.")
+        return 0
+
+    _print_twin_mcp_config(config)
+    return 0
+
+
+def run_twins_reset(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        result = client.reset_twins(args.run_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+
+    print(f"Run ID: {result.get('run_id', args.run_id)}")
+    print(f"Status: {result.get('status', 'unknown')}")
+    if result.get("baseline_kind"):
+        print(f"Baseline kind: {result['baseline_kind']}")
+    return 0
+
+
+def run_twins_extend(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        ttl = int(getattr(args, "ttl", 60) or 60)
+        result = client.extend_twins(args.run_id, ttl_minutes=ttl)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+
+    print(f"Run ID: {args.run_id}")
+    print(f"Extended TTL: {result.get('ttl_minutes', getattr(args, 'ttl', 60))} minutes")
+    return 0
+
+
+def run_twins_teardown(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        result = client.teardown_twins(args.run_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+
+    print(f"Run ID: {result.get('run_id', args.run_id)}")
+    print(f"Status: {result.get('status', 'unknown')}")
     return 0
 
 
@@ -2913,6 +3047,53 @@ def build_parser() -> argparse.ArgumentParser:
     twins_status_parser.add_argument("run_id", help="Twin provisioning run ID")
     twins_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     twins_status_parser.set_defaults(func=run_twins_status)
+
+    twins_mcp_config_parser = twins_subparsers.add_parser(
+        "mcp-config",
+        help="Print or install MCP server config for MCP-capable provisioned twins",
+    )
+    twins_mcp_config_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_mcp_config_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_mcp_config_parser.add_argument("--twin", default=None, help="Only include one twin, e.g. slack")
+    twins_mcp_config_parser.add_argument(
+        "--token",
+        default=None,
+        help="Optional twin-native bearer token to include in the MCP server config",
+    )
+    twins_mcp_config_parser.add_argument(
+        "--install",
+        action="store_true",
+        default=False,
+        help="Merge the generated twin MCP server config into detected IDE agent configs",
+    )
+    twins_mcp_config_parser.set_defaults(func=run_twins_mcp_config)
+
+    twins_reset_parser = twins_subparsers.add_parser(
+        "reset",
+        help="Reset twins to the baseline seed state captured at provision time (no VM restart)",
+    )
+    twins_reset_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_reset_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_reset_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_reset_parser.set_defaults(func=run_twins_reset)
+
+    twins_extend_parser = twins_subparsers.add_parser("extend", help="Extend twin provision TTL")
+    twins_extend_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_extend_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_extend_parser.add_argument(
+        "--ttl",
+        type=int,
+        default=60,
+        help="Additional TTL in minutes (default 60)",
+    )
+    twins_extend_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_extend_parser.set_defaults(func=run_twins_extend)
+
+    twins_teardown_parser = twins_subparsers.add_parser("teardown", help="Tear down a twin provision immediately")
+    twins_teardown_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    twins_teardown_parser.add_argument("run_id", help="Twin provisioning run ID")
+    twins_teardown_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    twins_teardown_parser.set_defaults(func=run_twins_teardown)
 
     test_runner_parser = subparsers.add_parser("test-runner", help="Manage scenarios, saved tests, and test runs")
     test_runner_subparsers = test_runner_parser.add_subparsers(dest="test_runner_command", required=True)

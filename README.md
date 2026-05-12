@@ -79,6 +79,20 @@ Provision twins directly:
 arga previews twins provision --twins gitlab --ttl 60 --wait
 ```
 
+Reset twins to the **baseline seed state** captured when they were provisioned (clears twin data in place; does **not** restart containers or replace the VM). Then re-check status:
+
+```bash
+arga previews twins reset <run_id>
+arga previews twins status <run_id>
+```
+
+Extend TTL or tear down a quickstart twin session:
+
+```bash
+arga previews twins extend <run_id> --ttl 90
+arga previews twins teardown <run_id>
+```
+
 Create and run saved tests:
 
 ```bash
@@ -139,6 +153,9 @@ arga previews sandboxes run --repo arga-labs/app --branch feature/demo
 arga previews pr-checks run --repo arga-labs/validation-server --pr 182
 arga previews twins provision --twins slack,jira,linear,gitlab --ttl 60 --wait
 arga previews twins status <run_id>
+arga previews twins reset <run_id>
+arga previews twins extend <run_id> --ttl 90
+arga previews twins teardown <run_id>
 arga previews pr-checks install arga-labs/validation-server
 arga previews pr-checks config arga-labs/validation-server
 arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
@@ -147,6 +164,8 @@ arga previews pr-checks config-set arga-labs/validation-server --trigger branch 
 - `arga previews sandboxes run` starts a branch-backed sandbox preview. Use `--twins` and `--scenario-id` to include seeded twins.
 - `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
 - `arga previews twins provision` provisions twins without running a browser test.
+- `arga previews twins reset` replays the provision-time seed baseline (state reset, not infra restart). For long-lived scenario environments, use the scenario reseed APIs instead.
+- `arga previews twins extend` / `teardown` adjust TTL or end the quickstart session.
 - `arga previews pr-checks install/config/config-set` manage automatic PR check settings.
 
 `arga validate pr` remains as a compatibility alias for PR checks.
