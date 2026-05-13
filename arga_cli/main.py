@@ -322,6 +322,61 @@ class ApiClient:
             run_type="pr_run",
         )
 
+    def create_sandbox(
+        self,
+        *,
+        repo: str,
+        branch: str | None = None,
+        pr_url: str | None = None,
+        twins: list[str] | None = None,
+        scenario_prompt: str | None = None,
+        scenario_id: str | None = None,
+        ttl_minutes: int | None = None,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"repo": repo}
+        if branch:
+            payload["branch"] = branch
+        if pr_url:
+            payload["pr_url"] = pr_url
+        if twins:
+            payload["twins"] = twins
+        if scenario_prompt:
+            payload["scenario_prompt"] = scenario_prompt
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
+        if ttl_minutes is not None:
+            payload["ttl_minutes"] = ttl_minutes
+        if env:
+            payload["env"] = env
+        response = self._client.post(
+            f"{self._api_url}/sandboxes",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to create sandbox")
+
+    def get_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/sandboxes/{sandbox_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load sandbox")
+
+    def delete_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        response = self._client.delete(
+            f"{self._api_url}/sandboxes/{sandbox_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to tear down sandbox")
+
+    def get_sandbox_logs(self, sandbox_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/sandboxes/{sandbox_id}/logs",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load sandbox logs")
+
     def provision_twins_start(
         self,
         *,
@@ -360,13 +415,6 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to load twin provision status")
-
-    def reset_twins(self, run_id: str) -> dict[str, Any]:
-        response = self._client.post(
-            f"{self._api_url}/validate/twins/provision/{run_id}/reset",
-            headers=self._auth_headers(),
-        )
-        return self._parse_json(response, "Failed to reset twins")
 
     def extend_twins(self, run_id: str, *, ttl_minutes: int = 60) -> dict[str, Any]:
         response = self._client.post(
@@ -1036,6 +1084,55 @@ def _print_twin_mcp_config(config: dict[str, Any]) -> None:
     print(json.dumps(config, indent=2))
 
 
+def _parse_env_assignments(values: list[str] | None) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for value in values or []:
+        if "=" not in value:
+            raise CliError(f"Invalid --env value: {value!r}. Expected KEY=VALUE.")
+        key, raw_value = value.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise CliError(f"Invalid --env value: {value!r}. Expected KEY=VALUE.")
+        env[key] = raw_value
+    return env
+
+
+def _print_sandbox_summary(payload: dict[str, Any], fallback_id: str | None = None) -> None:
+    sandbox_id = str(payload.get("sandbox_id") or fallback_id or "unknown")
+    print(f"Sandbox ID: {sandbox_id}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    if payload.get("app_url"):
+        print(f"App URL: {payload['app_url']}")
+    twins = payload.get("twins")
+    if isinstance(twins, dict) and twins:
+        print("Twins:")
+        for twin_name, twin_payload in twins.items():
+            if not isinstance(twin_payload, dict):
+                continue
+            base_url = twin_payload.get("base_url") or "-"
+            print(f"  {twin_name}: {base_url}")
+
+
+def _print_sandbox_logs(payload: dict[str, Any]) -> None:
+    sandbox_id = str(payload.get("sandbox_id") or "unknown")
+    print(f"Sandbox ID: {sandbox_id}")
+    logs = payload.get("logs")
+    if not isinstance(logs, list) or not logs:
+        print("No sandbox events yet.")
+        return
+    for event in logs:
+        if not isinstance(event, dict):
+            print(str(event))
+            continue
+        timestamp = str(event.get("timestamp") or "-")
+        event_type = str(event.get("type") or "event")
+        message = str(event.get("message") or "")
+        line = f"[{timestamp}] {event_type}"
+        if message:
+            line += f": {message}"
+        print(line)
+
+
 def run_test_url(args: argparse.Namespace) -> int:
     _warn_deprecated_alias(args, "arga test-runner runs url")
     if bool(args.email) != bool(args.password):
@@ -1188,35 +1285,86 @@ def run_validate_pr(args: argparse.Namespace) -> int:
 
 
 def run_previews_sandbox_run(args: argparse.Namespace) -> int:
+    if not getattr(args, "branch", None) and not getattr(args, "pr_url", None):
+        raise CliError("Either --branch or --pr-url is required.")
+
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        payload = client.start_pr_run(
+        ttl = _resolve_ttl(client, getattr(args, "ttl", None))
+        payload = client.create_sandbox(
             repo=args.repo,
-            branch=args.branch,
+            branch=getattr(args, "branch", None),
             pr_url=getattr(args, "pr_url", None),
-            frontend_url=getattr(args, "frontend_url", None),
-            context_notes=getattr(args, "context_notes", None),
             scenario_prompt=getattr(args, "scenario_prompt", None),
             scenario_id=getattr(args, "scenario_id", None),
             twins=_split_csv(getattr(args, "twins", None)),
-            session_id=getattr(args, "session_id", None),
-            run_type="agent_run",
+            ttl_minutes=ttl,
+            env=_parse_env_assignments(getattr(args, "env", None)),
         )
     finally:
         client.close()
 
     if args.json:
-        print(json.dumps(payload))
+        print(json.dumps(payload, indent=2))
         return 0
 
     print("Sandbox preview started.")
     print(f"Repository: {args.repo}")
-    print(f"Branch: {args.branch}")
-    print(f"Run ID: {payload.get('run_id', 'unknown')}")
+    if getattr(args, "branch", None):
+        print(f"Branch: {args.branch}")
+    if getattr(args, "pr_url", None):
+        print(f"PR URL: {args.pr_url}")
+    _print_sandbox_summary(payload)
+    return 0
+
+
+def run_previews_sandbox_status(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_sandbox(args.sandbox_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_sandbox_summary(payload, args.sandbox_id)
+    return 0
+
+
+def run_previews_sandbox_logs(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_sandbox_logs(args.sandbox_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_sandbox_logs(payload)
+    return 0
+
+
+def run_previews_sandbox_teardown(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.delete_sandbox(args.sandbox_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"Sandbox ID: {payload.get('sandbox_id', args.sandbox_id)}")
     print(f"Status: {payload.get('status', 'unknown')}")
-    if payload.get("session_id"):
-        print(f"Session ID: {payload['session_id']}")
     return 0
 
 
@@ -1339,25 +1487,6 @@ def run_twins_mcp_config(args: argparse.Namespace) -> int:
         return 0
 
     _print_twin_mcp_config(config)
-    return 0
-
-
-def run_twins_reset(args: argparse.Namespace) -> int:
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
-    try:
-        result = client.reset_twins(args.run_id)
-    finally:
-        client.close()
-
-    if args.json:
-        print(json.dumps(result, indent=2))
-        return 0
-
-    print(f"Run ID: {result.get('run_id', args.run_id)}")
-    print(f"Status: {result.get('status', 'unknown')}")
-    if result.get("baseline_kind"):
-        print(f"Baseline kind: {result['baseline_kind']}")
     return 0
 
 
@@ -3064,16 +3193,35 @@ def build_parser() -> argparse.ArgumentParser:
     sandbox_run_parser = sandboxes_subparsers.add_parser("run", help="Run a sandbox preview for a branch or PR")
     sandbox_run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     sandbox_run_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
-    sandbox_run_parser.add_argument("--branch", required=True, help="Branch to deploy into the sandbox")
+    sandbox_run_parser.add_argument("--branch", default=None, help="Branch to deploy into the sandbox")
     sandbox_run_parser.add_argument("--pr-url", default=None, help="Pull request URL when this sandbox is PR-backed")
-    sandbox_run_parser.add_argument("--frontend-url", default=None, help="Frontend URL to validate after deploy")
-    sandbox_run_parser.add_argument("--context-notes", default=None, help="Additional sandbox instructions")
     sandbox_run_parser.add_argument("--scenario-prompt", default=None, help="Scenario seed prompt for twins")
     sandbox_run_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
     sandbox_run_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
-    sandbox_run_parser.add_argument("--session-id", default=None, help="Reuse an existing validation session")
+    sandbox_run_parser.add_argument("--ttl", type=int, default=None, help="Sandbox TTL in minutes")
+    sandbox_run_parser.add_argument(
+        "--env",
+        action="append",
+        default=None,
+        help="Extra app env var in KEY=VALUE format. Repeat for multiple entries.",
+    )
     sandbox_run_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     sandbox_run_parser.set_defaults(func=run_previews_sandbox_run)
+    sandbox_status_parser = sandboxes_subparsers.add_parser("status", help="Show sandbox preview status")
+    sandbox_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    sandbox_status_parser.add_argument("sandbox_id", help="Sandbox ID")
+    sandbox_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    sandbox_status_parser.set_defaults(func=run_previews_sandbox_status)
+    sandbox_logs_parser = sandboxes_subparsers.add_parser("logs", help="Show sandbox preview events")
+    sandbox_logs_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    sandbox_logs_parser.add_argument("sandbox_id", help="Sandbox ID")
+    sandbox_logs_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    sandbox_logs_parser.set_defaults(func=run_previews_sandbox_logs)
+    sandbox_teardown_parser = sandboxes_subparsers.add_parser("teardown", help="Tear down a sandbox preview")
+    sandbox_teardown_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    sandbox_teardown_parser.add_argument("sandbox_id", help="Sandbox ID")
+    sandbox_teardown_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    sandbox_teardown_parser.set_defaults(func=run_previews_sandbox_teardown)
 
     pr_checks_parser = previews_subparsers.add_parser("pr-checks", help="Run and configure PR checks")
     pr_checks_subparsers = pr_checks_parser.add_subparsers(dest="pr_checks_command", required=True)
@@ -3155,15 +3303,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Merge the generated twin MCP server config into detected IDE agent configs",
     )
     twins_mcp_config_parser.set_defaults(func=run_twins_mcp_config)
-
-    twins_reset_parser = twins_subparsers.add_parser(
-        "reset",
-        help="Reset twins to the baseline seed state captured at provision time (no VM restart)",
-    )
-    twins_reset_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_reset_parser.add_argument("run_id", help="Twin provisioning run ID")
-    twins_reset_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_reset_parser.set_defaults(func=run_twins_reset)
 
     twins_extend_parser = twins_subparsers.add_parser("extend", help="Extend twin provision TTL")
     twins_extend_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")

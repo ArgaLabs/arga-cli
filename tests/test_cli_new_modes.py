@@ -54,7 +54,7 @@ def test_start_pr_run_posts_to_new_endpoint(monkeypatch) -> None:
     assert payload == {"run_id": "run_123", "session_id": "session_123", "status": "generating_story"}
 
 
-def test_twin_lifecycle_api_methods_use_supported_validation_server_routes(monkeypatch) -> None:
+def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch) -> None:
     client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
     captured: list[tuple[str, str, dict[str, object] | None]] = []
 
@@ -72,15 +72,37 @@ def test_twin_lifecycle_api_methods_use_supported_validation_server_routes(monke
         payload: object = [{"name": "linear", "label": "Linear", "kind": "backend", "show_in_ui": True}]
         if url.endswith("/status"):
             payload = {"run_id": "run_123", "status": "ready"}
+        elif "/sandboxes/" in url and url.endswith("/logs"):
+            payload = {"sandbox_id": "sandbox_123", "logs": []}
+        elif "/sandboxes/" in url:
+            payload = {"sandbox_id": "sandbox_123", "status": "ready", "twins": {}}
         return FakeResponse(payload)
+
+    def fake_delete(url: str, *, headers: dict[str, str]):
+        captured.append(("DELETE", url, None))
+        return FakeResponse({"sandbox_id": "sandbox_123", "status": "deleted"})
 
     def fake_post(url: str, *, headers: dict[str, str], json: dict[str, object] | None = None):
         captured.append(("POST", url, json))
+        if url.endswith("/sandboxes"):
+            return FakeResponse({"sandbox_id": "sandbox_123", "status": "queued", "twins": {}})
         return FakeResponse({"status": "ok", "run_id": "run_123", "ttl_minutes": 75, "is_public": False})
 
     monkeypatch.setattr(client._client, "get", fake_get)
+    monkeypatch.setattr(client._client, "delete", fake_delete)
     monkeypatch.setattr(client._client, "post", fake_post)
     try:
+        client.create_sandbox(
+            repo="arga-labs/app",
+            branch="feature/demo",
+            twins=["slack"],
+            scenario_id="scenario_123",
+            ttl_minutes=90,
+            env={"FEATURE_FLAG": "on"},
+        )
+        client.get_sandbox("sandbox_123")
+        client.get_sandbox_logs("sandbox_123")
+        client.delete_sandbox("sandbox_123")
         client.list_twins()
         client.provision_twins_start(
             twins=["linear"],
@@ -90,7 +112,6 @@ def test_twin_lifecycle_api_methods_use_supported_validation_server_routes(monke
             public=False,
         )
         client.get_twin_provision_status("run_123")
-        client.reset_twins("run_123")
         client.extend_twins("run_123", ttl_minutes=75)
         client.teardown_twins("run_123")
         client.lock_twins("run_123")
@@ -98,6 +119,21 @@ def test_twin_lifecycle_api_methods_use_supported_validation_server_routes(monke
         client.close()
 
     assert captured == [
+        (
+            "POST",
+            "https://api.argalabs.com/sandboxes",
+            {
+                "repo": "arga-labs/app",
+                "branch": "feature/demo",
+                "twins": ["slack"],
+                "scenario_id": "scenario_123",
+                "ttl_minutes": 90,
+                "env": {"FEATURE_FLAG": "on"},
+            },
+        ),
+        ("GET", "https://api.argalabs.com/sandboxes/sandbox_123", None),
+        ("GET", "https://api.argalabs.com/sandboxes/sandbox_123/logs", None),
+        ("DELETE", "https://api.argalabs.com/sandboxes/sandbox_123", None),
         ("GET", "https://api.argalabs.com/validate/twins", None),
         (
             "POST",
@@ -112,7 +148,6 @@ def test_twin_lifecycle_api_methods_use_supported_validation_server_routes(monke
             },
         ),
         ("GET", "https://api.argalabs.com/validate/twins/provision/run_123/status", None),
-        ("POST", "https://api.argalabs.com/validate/twins/provision/run_123/reset", None),
         (
             "POST",
             "https://api.argalabs.com/validate/twins/provision/run_123/extend",
@@ -250,16 +285,17 @@ def test_test_runner_runs_url_accepts_test_config(monkeypatch, tmp_path, capsys)
     assert "Run ID: demo_run_config" in output
 
 
-def test_previews_sandbox_run_uses_agent_run(monkeypatch, capsys) -> None:
+def test_previews_sandbox_run_uses_sandbox_api(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
     captured: dict[str, object] = {}
 
-    def fake_start_pr_run(self, **kwargs: object):
+    def fake_create_sandbox(self, **kwargs: object):
         captured.update(kwargs)
-        return {"run_id": "run_sandbox", "status": "generating_story", "session_id": "session_1"}
+        return {"sandbox_id": "sandbox_123", "status": "queued", "twins": {}}
 
-    monkeypatch.setattr(main.ApiClient, "start_pr_run", fake_start_pr_run)
+    monkeypatch.setattr(main.ApiClient, "create_sandbox", fake_create_sandbox)
 
     args = main.build_parser().parse_args(
         [
@@ -272,6 +308,10 @@ def test_previews_sandbox_run_uses_agent_run(monkeypatch, capsys) -> None:
             "feature/demo",
             "--twins",
             "slack",
+            "--ttl",
+            "45",
+            "--env",
+            "FEATURE_FLAG=on",
         ]
     )
     exit_code = args.func(args)
@@ -281,8 +321,53 @@ def test_previews_sandbox_run_uses_agent_run(monkeypatch, capsys) -> None:
     assert captured["repo"] == "arga-labs/app"
     assert captured["branch"] == "feature/demo"
     assert captured["twins"] == ["slack"]
-    assert captured["run_type"] == "agent_run"
+    assert captured["ttl_minutes"] == 45
+    assert captured["env"] == {"FEATURE_FLAG": "on"}
     assert "Sandbox preview started." in output
+    assert "Sandbox ID: sandbox_123" in output
+
+
+def test_previews_sandbox_status_logs_and_teardown(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(
+        main.ApiClient,
+        "get_sandbox",
+        lambda self, sandbox_id: {"sandbox_id": sandbox_id, "status": "ready", "app_url": "https://app.example.com"},
+    )
+    monkeypatch.setattr(
+        main.ApiClient,
+        "get_sandbox_logs",
+        lambda self, sandbox_id: {
+            "sandbox_id": sandbox_id,
+            "logs": [{"timestamp": "2026-05-13T12:00:00Z", "type": "deploy", "message": "Started"}],
+        },
+    )
+    monkeypatch.setattr(
+        main.ApiClient,
+        "delete_sandbox",
+        lambda self, sandbox_id: {"sandbox_id": sandbox_id, "status": "deleted"},
+    )
+
+    status_args = main.build_parser().parse_args(["previews", "sandboxes", "status", "sandbox_123"])
+    status_exit = status_args.func(status_args)
+    status_output = capsys.readouterr().out
+
+    logs_args = main.build_parser().parse_args(["previews", "sandboxes", "logs", "sandbox_123"])
+    logs_exit = logs_args.func(logs_args)
+    logs_output = capsys.readouterr().out
+
+    teardown_args = main.build_parser().parse_args(["previews", "sandboxes", "teardown", "sandbox_123"])
+    teardown_exit = teardown_args.func(teardown_args)
+    teardown_output = capsys.readouterr().out
+
+    assert status_exit == 0
+    assert "Sandbox ID: sandbox_123" in status_output
+    assert "App URL: https://app.example.com" in status_output
+    assert logs_exit == 0
+    assert "deploy: Started" in logs_output
+    assert teardown_exit == 0
+    assert "Status: deleted" in teardown_output
 
 
 def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
@@ -473,32 +558,6 @@ def test_twins_list_prints_catalog(monkeypatch, capsys) -> None:
     assert "jira" in output
     assert "Slack" in output
     assert "no" in output
-
-
-def test_twins_reset_hits_api(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
-    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
-    captured: dict[str, object] = {}
-
-    def fake_reset(self, run_id: str):
-        captured["run_id"] = run_id
-        return {
-            "run_id": run_id,
-            "status": "reset_complete",
-            "baseline_kind": "empty",
-            "factory_reset": {},
-            "seed_results": {},
-        }
-
-    monkeypatch.setattr(main.ApiClient, "reset_twins", fake_reset)
-
-    args = main.build_parser().parse_args(["previews", "twins", "reset", "run_xyz"])
-    exit_code = args.func(args)
-    out = capsys.readouterr().out
-
-    assert exit_code == 0
-    assert captured["run_id"] == "run_xyz"
-    assert "reset_complete" in out
 
 
 def test_twins_mcp_config_prints_capable_twin_config(monkeypatch, capsys) -> None:
