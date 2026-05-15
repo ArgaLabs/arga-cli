@@ -172,7 +172,7 @@ arga previews pr-checks disable arga-labs/validation-server --trigger branch
 - `arga previews twins extend` / `lock` / `teardown` adjust TTL, disable public access, or end the quickstart session.
 - `arga previews pr-checks install/config/config-set/enabled/enable/disable` manage automatic PR check settings.
 
-`arga validate pr` remains as a compatibility alias for PR checks.
+`arga validate` remains as a compatibility alias for older PR-check commands. New PR-check management commands are available only under `arga previews pr-checks`.
 
 ### Test Runner
 

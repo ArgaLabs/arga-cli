@@ -109,7 +109,7 @@ def test_validate_config_set_merges_unspecified_values(monkeypatch, capsys) -> N
     assert "PR Comments: on" in output
 
 
-def test_validate_enabled_lists_current_repo_configs(monkeypatch, capsys) -> None:
+def test_pr_checks_enabled_lists_current_repo_configs(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
 
@@ -139,7 +139,8 @@ def test_validate_enabled_lists_current_repo_configs(monkeypatch, capsys) -> Non
 
     monkeypatch.setattr(main.ApiClient, "list_enabled_github_validations", fake_list)
 
-    exit_code = main.run_validate_cli(["enabled"])
+    args = main.build_parser().parse_args(["previews", "pr-checks", "enabled"])
+    exit_code = args.func(args)
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -149,7 +150,7 @@ def test_validate_enabled_lists_current_repo_configs(monkeypatch, capsys) -> Non
     assert "Trigger Mode: pr" in output
 
 
-def test_validate_enabled_supports_json(monkeypatch, capsys) -> None:
+def test_pr_checks_enabled_supports_json(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
 
@@ -159,14 +160,15 @@ def test_validate_enabled_supports_json(monkeypatch, capsys) -> None:
         lambda self: [{"repo": "arga-labs/validation-server", "trigger_mode": "pr", "enabled": True}],
     )
 
-    exit_code = main.run_validate_cli(["enabled", "--json"])
+    args = main.build_parser().parse_args(["previews", "pr-checks", "enabled", "--json"])
+    exit_code = args.func(args)
     output = capsys.readouterr().out
 
     assert exit_code == 0
     assert '"repo": "arga-labs/validation-server"' in output
 
 
-def test_validate_enable_toggles_existing_config(monkeypatch, capsys) -> None:
+def test_pr_checks_enable_toggles_existing_config(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
@@ -188,7 +190,10 @@ def test_validate_enable_toggles_existing_config(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(main.ApiClient, "toggle_github_validation_config", fake_toggle)
 
-    exit_code = main.run_validate_cli(["enable", "arga-labs/validation-server", "--trigger", "branch"])
+    args = main.build_parser().parse_args(
+        ["previews", "pr-checks", "enable", "arga-labs/validation-server", "--trigger", "branch"]
+    )
+    exit_code = args.func(args)
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -201,7 +206,7 @@ def test_validate_enable_toggles_existing_config(monkeypatch, capsys) -> None:
     assert "Enabled: yes" in output
 
 
-def test_validate_disable_toggles_existing_config(monkeypatch, capsys) -> None:
+def test_pr_checks_disable_toggles_existing_config(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
@@ -223,7 +228,10 @@ def test_validate_disable_toggles_existing_config(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(main.ApiClient, "toggle_github_validation_config", fake_toggle)
 
-    exit_code = main.run_validate_cli(["disable", "arga-labs/validation-server", "--trigger", "branch"])
+    args = main.build_parser().parse_args(
+        ["previews", "pr-checks", "disable", "arga-labs/validation-server", "--trigger", "branch"]
+    )
+    exit_code = args.func(args)
     output = capsys.readouterr().out
 
     assert exit_code == 0
