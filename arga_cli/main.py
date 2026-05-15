@@ -322,6 +322,61 @@ class ApiClient:
             run_type="pr_run",
         )
 
+    def create_sandbox(
+        self,
+        *,
+        repo: str,
+        branch: str | None = None,
+        pr_url: str | None = None,
+        twins: list[str] | None = None,
+        scenario_prompt: str | None = None,
+        scenario_id: str | None = None,
+        ttl_minutes: int | None = None,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"repo": repo}
+        if branch:
+            payload["branch"] = branch
+        if pr_url:
+            payload["pr_url"] = pr_url
+        if twins:
+            payload["twins"] = twins
+        if scenario_prompt:
+            payload["scenario_prompt"] = scenario_prompt
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
+        if ttl_minutes is not None:
+            payload["ttl_minutes"] = ttl_minutes
+        if env:
+            payload["env"] = env
+        response = self._client.post(
+            f"{self._api_url}/sandboxes",
+            json=payload,
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to create sandbox")
+
+    def get_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/sandboxes/{sandbox_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load sandbox")
+
+    def delete_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        response = self._client.delete(
+            f"{self._api_url}/sandboxes/{sandbox_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to tear down sandbox")
+
+    def get_sandbox_logs(self, sandbox_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/sandboxes/{sandbox_id}/logs",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load sandbox logs")
+
     def provision_twins_start(
         self,
         *,
@@ -360,13 +415,6 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to load twin provision status")
-
-    def reset_twins(self, run_id: str) -> dict[str, Any]:
-        response = self._client.post(
-            f"{self._api_url}/validate/twins/provision/{run_id}/reset",
-            headers=self._auth_headers(),
-        )
-        return self._parse_json(response, "Failed to reset twins")
 
     def extend_twins(self, run_id: str, *, ttl_minutes: int = 60) -> dict[str, Any]:
         response = self._client.post(
@@ -587,6 +635,16 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to load validation config")
 
+    def list_enabled_github_validations(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/validation/github/enabled",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to load enabled PR check configs")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /validation/github/enabled")
+        return payload
+
     def save_github_validation_config(
         self,
         *,
@@ -608,6 +666,20 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to save validation config")
+
+    def toggle_github_validation_config(
+        self,
+        *,
+        repo: str,
+        trigger_mode: str,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        response = self._client.patch(
+            f"{self._api_url}/validation/github/config",
+            json={"repo": repo, "trigger_mode": trigger_mode, "enabled": enabled},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to update validation config")
 
     def _auth_headers(self) -> dict[str, str]:
         if not self._api_key:
@@ -858,11 +930,11 @@ def _read_json_file(path: str | Path) -> dict[str, Any]:
 
 
 def _write_json_output(payload: dict[str, Any], output: str | None) -> None:
-    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    if output:
-        Path(output).write_text(text)
-    else:
-        print(text, end="")
+        text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        if output:
+            Path(output).write_text(text)
+        else:
+            print(text, end="")
 
 
 def _extract_test_config(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1036,6 +1108,55 @@ def _print_twin_mcp_config(config: dict[str, Any]) -> None:
     print(json.dumps(config, indent=2))
 
 
+def _parse_env_assignments(values: list[str] | None) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for value in values or []:
+        if "=" not in value:
+            raise CliError(f"Invalid --env value: {value!r}. Expected KEY=VALUE.")
+        key, raw_value = value.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise CliError(f"Invalid --env value: {value!r}. Expected KEY=VALUE.")
+        env[key] = raw_value
+    return env
+
+
+def _print_sandbox_summary(payload: dict[str, Any], fallback_id: str | None = None) -> None:
+    sandbox_id = str(payload.get("sandbox_id") or fallback_id or "unknown")
+    print(f"Sandbox ID: {sandbox_id}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    if payload.get("app_url"):
+        print(f"App URL: {payload['app_url']}")
+    twins = payload.get("twins")
+    if isinstance(twins, dict) and twins:
+        print("Twins:")
+        for twin_name, twin_payload in twins.items():
+            if not isinstance(twin_payload, dict):
+                continue
+            base_url = twin_payload.get("base_url") or "-"
+            print(f"  {twin_name}: {base_url}")
+
+
+def _print_sandbox_logs(payload: dict[str, Any]) -> None:
+    sandbox_id = str(payload.get("sandbox_id") or "unknown")
+    print(f"Sandbox ID: {sandbox_id}")
+    logs = payload.get("logs")
+    if not isinstance(logs, list) or not logs:
+        print("No sandbox events yet.")
+        return
+    for event in logs:
+        if not isinstance(event, dict):
+            print(str(event))
+            continue
+        timestamp = str(event.get("timestamp") or "-")
+        event_type = str(event.get("type") or "event")
+        message = str(event.get("message") or "")
+        line = f"[{timestamp}] {event_type}"
+        if message:
+            line += f": {message}"
+        print(line)
+
+
 def run_test_url(args: argparse.Namespace) -> int:
     _warn_deprecated_alias(args, "arga test-runner runs url")
     if bool(args.email) != bool(args.password):
@@ -1188,35 +1309,86 @@ def run_validate_pr(args: argparse.Namespace) -> int:
 
 
 def run_previews_sandbox_run(args: argparse.Namespace) -> int:
+    if not getattr(args, "branch", None) and not getattr(args, "pr_url", None):
+        raise CliError("Either --branch or --pr-url is required.")
+
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        payload = client.start_pr_run(
+        ttl = _resolve_ttl(client, getattr(args, "ttl", None))
+        payload = client.create_sandbox(
             repo=args.repo,
-            branch=args.branch,
+            branch=getattr(args, "branch", None),
             pr_url=getattr(args, "pr_url", None),
-            frontend_url=getattr(args, "frontend_url", None),
-            context_notes=getattr(args, "context_notes", None),
             scenario_prompt=getattr(args, "scenario_prompt", None),
             scenario_id=getattr(args, "scenario_id", None),
             twins=_split_csv(getattr(args, "twins", None)),
-            session_id=getattr(args, "session_id", None),
-            run_type="agent_run",
+            ttl_minutes=ttl,
+            env=_parse_env_assignments(getattr(args, "env", None)),
         )
     finally:
         client.close()
 
     if args.json:
-        print(json.dumps(payload))
+        print(json.dumps(payload, indent=2))
         return 0
 
     print("Sandbox preview started.")
     print(f"Repository: {args.repo}")
-    print(f"Branch: {args.branch}")
-    print(f"Run ID: {payload.get('run_id', 'unknown')}")
+    if getattr(args, "branch", None):
+        print(f"Branch: {args.branch}")
+    if getattr(args, "pr_url", None):
+        print(f"PR URL: {args.pr_url}")
+    _print_sandbox_summary(payload)
+    return 0
+
+
+def run_previews_sandbox_status(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_sandbox(args.sandbox_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_sandbox_summary(payload, args.sandbox_id)
+    return 0
+
+
+def run_previews_sandbox_logs(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_sandbox_logs(args.sandbox_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_sandbox_logs(payload)
+    return 0
+
+
+def run_previews_sandbox_teardown(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.delete_sandbox(args.sandbox_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"Sandbox ID: {payload.get('sandbox_id', args.sandbox_id)}")
     print(f"Status: {payload.get('status', 'unknown')}")
-    if payload.get("session_id"):
-        print(f"Session ID: {payload['session_id']}")
     return 0
 
 
@@ -1339,25 +1511,6 @@ def run_twins_mcp_config(args: argparse.Namespace) -> int:
         return 0
 
     _print_twin_mcp_config(config)
-    return 0
-
-
-def run_twins_reset(args: argparse.Namespace) -> int:
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
-    try:
-        result = client.reset_twins(args.run_id)
-    finally:
-        client.close()
-
-    if args.json:
-        print(json.dumps(result, indent=2))
-        return 0
-
-    print(f"Run ID: {result.get('run_id', args.run_id)}")
-    print(f"Status: {result.get('status', 'unknown')}")
-    if result.get("baseline_kind"):
-        print(f"Baseline kind: {result['baseline_kind']}")
     return 0
 
 
@@ -1571,6 +1724,9 @@ def _validate_help_text() -> str:
         "       arga validate install <repo>\n"
         "       arga validate config <repo>\n"
         "       arga validate config set <repo> [--trigger pr|branch] [--branch <name>] [--comments on|off]\n\n"
+        "       arga validate enabled [--json]\n"
+        "       arga validate enable <repo> [--trigger pr|branch] [--json]\n"
+        "       arga validate disable <repo> [--trigger pr|branch] [--json]\n\n"
         "Start validations or manage automatic validation settings."
     )
 
@@ -1629,6 +1785,30 @@ def _build_validate_config_set_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_validate_enabled_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arga validate enabled",
+        description="List enabled PR check configs.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    return parser
+
+
+def _build_validate_toggle_parser(action: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog=f"arga validate {action}",
+        description=f"{action.capitalize()} an existing PR check config.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    parser.add_argument("repo", help="Repository in owner/repo format")
+    parser.add_argument("--trigger", choices=("pr", "branch"), default="pr", help="Configured validation trigger mode")
+    parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    return parser
+
+
 def _bool_label(value: bool) -> str:
     return "yes" if value else "no"
 
@@ -1646,6 +1826,13 @@ def _print_validation_config(payload: dict[str, Any]) -> None:
     print(f"Branch: {payload.get('branch') or '-'}")
     print(f"Default Branch: {payload.get('default_branch') or '-'}")
     print(f"PR Comments: {_comments_label(bool(payload.get('comment_on_pr', True)))}")
+
+
+def _print_enabled_validation_configs(configs: list[dict[str, Any]]) -> None:
+    for index, payload in enumerate(configs):
+        if index:
+            print()
+        _print_validation_config(payload)
 
 
 def run_validate_install(args: argparse.Namespace) -> int:
@@ -1697,6 +1884,56 @@ def run_validate_config_set(args: argparse.Namespace) -> int:
     print("Saved validation config.\n")
     _print_validation_config(payload)
     return 0
+
+
+def run_validate_enabled(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.list_enabled_github_validations()
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload))
+        return 0
+
+    if not payload:
+        print("No enabled PR check configs found.")
+        return 0
+
+    _print_enabled_validation_configs(payload)
+    return 0
+
+
+def _run_validate_toggle(args: argparse.Namespace, *, enabled: bool) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.toggle_github_validation_config(
+            repo=args.repo,
+            trigger_mode=args.trigger,
+            enabled=enabled,
+        )
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload))
+        return 0
+
+    action = "Enabled" if enabled else "Disabled"
+    print(f"{action} PR checks.\n")
+    _print_validation_config(payload)
+    return 0
+
+
+def run_validate_enable(args: argparse.Namespace) -> int:
+    return _run_validate_toggle(args, enabled=True)
+
+
+def run_validate_disable(args: argparse.Namespace) -> int:
+    return _run_validate_toggle(args, enabled=False)
 
 
 def run_mcp_install(args: argparse.Namespace) -> int:
@@ -2472,6 +2709,12 @@ def run_validate_cli(argv: list[str]) -> int:
         if len(argv) > 1 and argv[1] == "set":
             return run_validate_config_set(_build_validate_config_set_parser().parse_args(argv[2:]))
         return run_validate_config(_build_validate_config_parser().parse_args(argv[1:]))
+    if argv[0] == "enabled":
+        return run_validate_enabled(_build_validate_enabled_parser().parse_args(argv[1:]))
+    if argv[0] == "enable":
+        return run_validate_enable(_build_validate_toggle_parser("enable").parse_args(argv[1:]))
+    if argv[0] == "disable":
+        return run_validate_disable(_build_validate_toggle_parser("disable").parse_args(argv[1:]))
 
     raise CliError(f"Unknown validate subcommand: {argv[0]}")
 
@@ -2748,7 +2991,7 @@ def run_wizard_reset(_args: argparse.Namespace) -> int:
             client._client.post(reset_url, json={}, headers={"Content-Type": "application/json"})
             console.print(f"  {label}: [green]reset[/green]")
         except Exception as exc:
-            console.print(f"  {label}: [red]failed \u2014 {exc}[/red]")
+            console.print(f"  {label}: [red]failed — {exc}[/red]")
 
     client.close()
     green("\nDone.")
@@ -2919,392 +3162,4 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_delete_parser.set_defaults(func=run_scenarios_delete, deprecated_alias=deprecated_alias)
 
 
-def _add_saved_test_parsers(subparsers: argparse._SubParsersAction) -> None:
-    list_parser = subparsers.add_parser("list", help="List saved tests")
-    list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    list_parser.add_argument("--repo", default=None, help="Filter by repository")
-    list_parser.add_argument("--json", action="store_true", default=False)
-    list_parser.set_defaults(func=run_tests_list)
-
-    get_parser = subparsers.add_parser("get", help="Get a saved test")
-    get_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    get_parser.add_argument("test_id", help="Saved test ID")
-    get_parser.add_argument("--json", action="store_true", default=False)
-    get_parser.set_defaults(func=run_tests_get)
-
-    create_parser = subparsers.add_parser("create", help="Create a saved test")
-    create_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    create_parser.add_argument("--name", required=True, help="Saved test name")
-    create_parser.add_argument("--description", default=None)
-    create_parser.add_argument("--run-id", default=None, help="Source demo runner run ID")
-    create_parser.add_argument("--test-config", default=None, help="TestConfig JSON file")
-    create_parser.add_argument("--prompt", default=None)
-    create_parser.add_argument("--url", default=None, help="Start URL")
-    create_parser.add_argument("--repo", default=None, help="Repository in owner/repo format")
-    create_parser.add_argument("--ci", action="store_true", default=False, help="Enable for CI checks")
-    create_parser.add_argument("--tag", action="append", default=None)
-    create_parser.add_argument("--json", action="store_true", default=False)
-    create_parser.set_defaults(func=run_tests_create)
-
-    import_parser = subparsers.add_parser("import", help="Import a saved test JSON file")
-    import_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    import_parser.add_argument("--file", required=True)
-    import_parser.add_argument("--json", action="store_true", default=False)
-    import_parser.set_defaults(func=run_tests_import)
-
-    export_parser = subparsers.add_parser("export", help="Export a saved test JSON file")
-    export_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    export_parser.add_argument("test_id")
-    export_parser.add_argument("--output", "-o", default=None)
-    export_parser.set_defaults(func=run_tests_export)
-
-    edit_parser = subparsers.add_parser("edit", help="Edit a saved test in $EDITOR")
-    edit_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    edit_parser.add_argument("test_id")
-    edit_parser.add_argument("--json", action="store_true", default=False)
-    edit_parser.set_defaults(func=run_tests_edit)
-
-    delete_parser = subparsers.add_parser("delete", help="Delete a saved test")
-    delete_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    delete_parser.add_argument("test_id")
-    delete_parser.add_argument("--json", action="store_true", default=False)
-    delete_parser.set_defaults(func=run_tests_delete)
-
-    run_parser = subparsers.add_parser("run", help="Run a saved test")
-    run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    run_parser.add_argument("test_id")
-    run_parser.add_argument("--url", default=None, help="Override start URL")
-    run_parser.add_argument("--prompt", default=None, help="Override prompt")
-    run_parser.add_argument("--twins", default=None, help="Comma-separated twins")
-    run_parser.add_argument("--ttl", type=int, default=None)
-    run_parser.add_argument("--session-id", default=None)
-    run_parser.add_argument("--json", action="store_true", default=False)
-    run_parser.set_defaults(func=run_tests_run)
-
-    config_parser = subparsers.add_parser("config", help="Validate and summarize TestConfig files")
-    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
-    validate_parser = config_subparsers.add_parser("validate", help="Validate a TestConfig JSON file")
-    validate_parser.add_argument("--file", required=True)
-    validate_parser.add_argument("--json", action="store_true", default=False)
-    validate_parser.set_defaults(func=run_tests_config_validate)
-    summarize_parser = config_subparsers.add_parser("summarize", help="Summarize a TestConfig JSON file")
-    summarize_parser.add_argument("--file", required=True)
-    summarize_parser.add_argument("--json", action="store_true", default=False)
-    summarize_parser.set_defaults(func=run_tests_config_summarize)
-    normalize_parser = config_subparsers.add_parser("normalize", help="Normalize a TestConfig JSON file")
-    normalize_parser.add_argument("--file", required=True)
-    normalize_parser.add_argument("--output", "-o", default=None)
-    normalize_parser.set_defaults(func=run_tests_config_normalize)
-
-
-def _add_demo_run_parsers(subparsers: argparse._SubParsersAction, *, deprecated_alias: bool = False) -> None:
-    url_parser = subparsers.add_parser("url", help="Run a browser validation against a deployed URL")
-    _add_url_run_arguments(url_parser)
-    url_parser.set_defaults(func=run_test_url, deprecated_alias=deprecated_alias)
-
-    list_parser = subparsers.add_parser("list", help="List recent test runner runs")
-    list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    list_parser.add_argument("--json", action="store_true", default=False)
-    list_parser.set_defaults(func=run_demo_runs_list, deprecated_alias=deprecated_alias)
-
-    get_parser = subparsers.add_parser("get", help="Get a test runner run")
-    get_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    get_parser.add_argument("run_id")
-    get_parser.add_argument("--json", action="store_true", default=False)
-    get_parser.set_defaults(func=run_demo_runs_get)
-
-    logs_parser = subparsers.add_parser("logs", help="Show test runner events")
-    logs_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    logs_parser.add_argument("run_id")
-    logs_parser.add_argument("--json", action="store_true", default=False)
-    logs_parser.set_defaults(func=run_demo_runs_logs)
-
-    rerun_parser = subparsers.add_parser("rerun", help="Rerun a test runner run")
-    rerun_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    rerun_parser.add_argument("run_id")
-    rerun_parser.add_argument("--prompt", default=None)
-    rerun_parser.add_argument("--url", default=None)
-    rerun_parser.add_argument("--json", action="store_true", default=False)
-    rerun_parser.set_defaults(func=run_demo_runs_rerun)
-
-    message_parser = subparsers.add_parser("message", help="Send a message to a live test runner run")
-    message_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    message_parser.add_argument("run_id")
-    message_parser.add_argument("message")
-    message_parser.add_argument("--json", action="store_true", default=False)
-    message_parser.set_defaults(func=run_demo_runs_message)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="arga")
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {_cli_version()}",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    login_parser = subparsers.add_parser("login", help="Authenticate the CLI")
-    login_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    login_parser.set_defaults(func=run_login)
-
-    logout_parser = subparsers.add_parser("logout", help="Remove the saved API key")
-    logout_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    logout_parser.set_defaults(func=run_logout)
-
-    whoami_parser = subparsers.add_parser("whoami", help="Show the authenticated user")
-    whoami_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    whoami_parser.set_defaults(func=run_whoami)
-
-    previews_parser = subparsers.add_parser("previews", help="Manage preview environments")
-    previews_subparsers = previews_parser.add_subparsers(dest="previews_command", required=True)
-
-    sandboxes_parser = previews_subparsers.add_parser("sandboxes", help="Run sandbox preview environments")
-    sandboxes_subparsers = sandboxes_parser.add_subparsers(dest="sandboxes_command", required=True)
-    sandbox_run_parser = sandboxes_subparsers.add_parser("run", help="Run a sandbox preview for a branch or PR")
-    sandbox_run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    sandbox_run_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
-    sandbox_run_parser.add_argument("--branch", required=True, help="Branch to deploy into the sandbox")
-    sandbox_run_parser.add_argument("--pr-url", default=None, help="Pull request URL when this sandbox is PR-backed")
-    sandbox_run_parser.add_argument("--frontend-url", default=None, help="Frontend URL to validate after deploy")
-    sandbox_run_parser.add_argument("--context-notes", default=None, help="Additional sandbox instructions")
-    sandbox_run_parser.add_argument("--scenario-prompt", default=None, help="Scenario seed prompt for twins")
-    sandbox_run_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
-    sandbox_run_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
-    sandbox_run_parser.add_argument("--session-id", default=None, help="Reuse an existing validation session")
-    sandbox_run_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    sandbox_run_parser.set_defaults(func=run_previews_sandbox_run)
-
-    pr_checks_parser = previews_subparsers.add_parser("pr-checks", help="Run and configure PR checks")
-    pr_checks_subparsers = pr_checks_parser.add_subparsers(dest="pr_checks_command", required=True)
-    pr_checks_run_parser = pr_checks_subparsers.add_parser("run", help="Run a PR check")
-    pr_checks_run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    pr_checks_run_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
-    pr_checks_run_parser.add_argument("--pr-url", default=None, help="Pull request URL")
-    pr_checks_run_parser.add_argument("--pr", type=int, default=None, help="Pull request number")
-    pr_checks_run_parser.add_argument("--branch", default=None, help="Branch to validate")
-    pr_checks_run_parser.add_argument("--frontend-url", default=None, help="Frontend URL to validate")
-    pr_checks_run_parser.add_argument("--context-notes", default=None, help="Additional instructions")
-    pr_checks_run_parser.add_argument("--scenario-prompt", default=None, help="Scenario seed prompt for twins")
-    pr_checks_run_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
-    pr_checks_run_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
-    pr_checks_run_parser.add_argument("--session-id", default=None, help="Reuse an existing validation session")
-    pr_checks_run_parser.add_argument("--run-type", default="pr_run", choices=("pr_run", "agent_run"))
-    pr_checks_run_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    pr_checks_run_parser.set_defaults(func=run_validate_pr)
-    pr_checks_install_parser = pr_checks_subparsers.add_parser("install", help="Install automatic PR checks")
-    pr_checks_install_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    pr_checks_install_parser.add_argument("repo", help="Repository in owner/repo format")
-    pr_checks_install_parser.set_defaults(func=run_validate_install)
-    pr_checks_config_parser = pr_checks_subparsers.add_parser("config", help="Show PR check config")
-    pr_checks_config_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    pr_checks_config_parser.add_argument("repo", help="Repository in owner/repo format")
-    pr_checks_config_parser.set_defaults(func=run_validate_config)
-    pr_checks_config_set_parser = pr_checks_subparsers.add_parser("config-set", help="Save PR check config")
-    pr_checks_config_set_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    pr_checks_config_set_parser.add_argument("repo", help="Repository in owner/repo format")
-    pr_checks_config_set_parser.add_argument("--trigger", choices=("pr", "branch"), help="Validation trigger mode")
-    pr_checks_config_set_parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
-    pr_checks_config_set_parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
-    pr_checks_config_set_parser.set_defaults(func=run_validate_config_set)
-
-    twins_parser = previews_subparsers.add_parser("twins", help="Manage twin provisioning")
-    twins_subparsers = twins_parser.add_subparsers(dest="twins_command", required=True)
-    twins_list_parser = twins_subparsers.add_parser("list", help="List available twins")
-    twins_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_list_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_list_parser.set_defaults(func=run_twins_list)
-    twins_provision_parser = twins_subparsers.add_parser("provision", help="Provision one or more twins")
-    twins_provision_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_provision_parser.add_argument("--twins", required=True, help="Comma-separated twins, e.g. gitlab,jira,slack")
-    twins_provision_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
-    twins_provision_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
-    twins_provision_parser.add_argument("--scenario-prompt", default=None, help="Scenario prompt to seed twins")
-    twins_provision_parser.add_argument(
-        "--private",
-        action="store_true",
-        default=False,
-        help="Keep twins behind proxy auth instead of using public base URLs",
-    )
-    twins_provision_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
-    twins_provision_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
-    twins_provision_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_provision_parser.set_defaults(func=run_twins_provision)
-    twins_status_parser = twins_subparsers.add_parser("status", help="Show twin provisioning status")
-    twins_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_status_parser.add_argument("run_id", help="Twin provisioning run ID")
-    twins_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_status_parser.set_defaults(func=run_twins_status)
-
-    twins_mcp_config_parser = twins_subparsers.add_parser(
-        "mcp-config",
-        help="Print or install MCP server config for MCP-capable provisioned twins",
-    )
-    twins_mcp_config_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_mcp_config_parser.add_argument("run_id", help="Twin provisioning run ID")
-    twins_mcp_config_parser.add_argument("--twin", default=None, help="Only include one twin, e.g. slack")
-    twins_mcp_config_parser.add_argument(
-        "--token",
-        default=None,
-        help="Optional twin-native bearer token to include in the MCP server config",
-    )
-    twins_mcp_config_parser.add_argument(
-        "--install",
-        action="store_true",
-        default=False,
-        help="Merge the generated twin MCP server config into detected IDE agent configs",
-    )
-    twins_mcp_config_parser.set_defaults(func=run_twins_mcp_config)
-
-    twins_reset_parser = twins_subparsers.add_parser(
-        "reset",
-        help="Reset twins to the baseline seed state captured at provision time (no VM restart)",
-    )
-    twins_reset_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_reset_parser.add_argument("run_id", help="Twin provisioning run ID")
-    twins_reset_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_reset_parser.set_defaults(func=run_twins_reset)
-
-    twins_extend_parser = twins_subparsers.add_parser("extend", help="Extend twin provision TTL")
-    twins_extend_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_extend_parser.add_argument("run_id", help="Twin provisioning run ID")
-    twins_extend_parser.add_argument(
-        "--ttl",
-        type=int,
-        default=60,
-        help="Additional TTL in minutes (default 60)",
-    )
-    twins_extend_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_extend_parser.set_defaults(func=run_twins_extend)
-
-    twins_teardown_parser = twins_subparsers.add_parser("teardown", help="Tear down a twin provision immediately")
-    twins_teardown_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_teardown_parser.add_argument("run_id", help="Twin provisioning run ID")
-    twins_teardown_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_teardown_parser.set_defaults(func=run_twins_teardown)
-
-    twins_lock_parser = twins_subparsers.add_parser("lock", help="Disable public access for a twin session")
-    twins_lock_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    twins_lock_parser.add_argument("run_id", help="Twin provisioning run ID")
-    twins_lock_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    twins_lock_parser.set_defaults(func=run_twins_lock)
-
-    test_runner_parser = subparsers.add_parser("test-runner", help="Manage scenarios, saved tests, and test runs")
-    test_runner_subparsers = test_runner_parser.add_subparsers(dest="test_runner_command", required=True)
-
-    scenarios_parser = test_runner_subparsers.add_parser("scenarios", help="Manage twin seed scenarios")
-    scenarios_subparsers = scenarios_parser.add_subparsers(dest="scenarios_command", required=True)
-    _add_scenario_parsers(scenarios_subparsers)
-
-    tests_parser = test_runner_subparsers.add_parser("tests", help="Manage saved browser tests")
-    tests_subparsers = tests_parser.add_subparsers(dest="tests_command", required=True)
-    _add_saved_test_parsers(tests_subparsers)
-
-    demo_runs_parser = test_runner_subparsers.add_parser("runs", help="Run and inspect live browser tests")
-    demo_runs_subparsers = demo_runs_parser.add_subparsers(dest="demo_runs_command", required=True)
-    _add_demo_run_parsers(demo_runs_subparsers)
-
-    test_parser = subparsers.add_parser("test", help="Deprecated alias for test-runner runs")
-    test_subparsers = test_parser.add_subparsers(dest="test_command", required=True)
-    test_url_parser = test_subparsers.add_parser("url", help="Deprecated alias for test-runner runs url")
-    _add_url_run_arguments(test_url_parser)
-    test_url_parser.set_defaults(func=run_test_url, deprecated_alias=True)
-
-    scenarios_alias_parser = subparsers.add_parser("scenarios", help="Deprecated alias for test-runner scenarios")
-    scenarios_alias_subparsers = scenarios_alias_parser.add_subparsers(dest="scenarios_command", required=True)
-    _add_scenario_parsers(scenarios_alias_subparsers, deprecated_alias=True)
-
-    validate_parser = subparsers.add_parser("validate", help="Deprecated alias for previews pr-checks")
-    validate_subparsers = validate_parser.add_subparsers(dest="validate_command", required=True)
-    validate_pr_parser = validate_subparsers.add_parser("pr", help="Deprecated alias for previews pr-checks run")
-    validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
-    validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
-    validate_pr_parser.add_argument("--context-notes", default=None, help="Additional instructions or context")
-    validate_pr_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    validate_pr_parser.set_defaults(func=run_validate_pr, deprecated_alias=True)
-
-    mcp_parser = subparsers.add_parser("mcp", help="Manage MCP integrations")
-    mcp_subparsers = mcp_parser.add_subparsers(dest="mcp_command", required=True)
-
-    mcp_install_parser = mcp_subparsers.add_parser(
-        "install",
-        help="Install Arga MCP config into supported IDE agents",
-    )
-    mcp_install_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    mcp_install_parser.set_defaults(func=run_mcp_install)
-
-    runs_parser = subparsers.add_parser("runs", help="List, inspect, cancel, or read validation run logs")
-    runs_subparsers = runs_parser.add_subparsers(dest="runs_command", required=True)
-
-    runs_list_parser = runs_subparsers.add_parser("list", help="List recent validation runs")
-    runs_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    runs_list_parser.add_argument("--repo", help="Filter by repository in owner/repo format")
-    runs_list_parser.add_argument(
-        "--status",
-        choices=("completed", "failed", "running"),
-        help="Filter by validation status",
-    )
-    runs_list_parser.add_argument("--limit", type=int, default=20, help="Maximum number of runs to show")
-    runs_list_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    runs_list_parser.set_defaults(func=run_runs_list)
-
-    runs_status_parser = runs_subparsers.add_parser("status", help="Show detailed status for a validation run")
-    runs_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    runs_status_parser.add_argument("run_id", help="Validation run ID")
-    runs_status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
-    runs_status_parser.set_defaults(func=run_runs_status)
-
-    runs_logs_parser = runs_subparsers.add_parser("logs", help="Show worker and runtime logs for a validation run")
-    runs_logs_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    runs_logs_parser.add_argument(
-        "run_id",
-        nargs="?",
-        help=f"Validation run ID. Defaults to {WIZARD_SESSION_FILE} in the current directory when available.",
-    )
-    runs_logs_parser.add_argument("--json", action="store_true", help="Print the raw JSON response")
-    runs_logs_parser.add_argument(
-        "--errors-only",
-        action="store_true",
-        help="Show only failed worker logs and warning/error runtime logs",
-    )
-    runs_logs_parser.set_defaults(func=run_runs_logs)
-
-    runs_cancel_parser = runs_subparsers.add_parser("cancel", help="Cancel a validation run")
-    runs_cancel_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
-    runs_cancel_parser.add_argument("run_id", help="Validation run ID")
-    runs_cancel_parser.set_defaults(func=run_runs_cancel)
-
-    subparsers.add_parser("wizard", help="Twins quickstart wizard (run `arga wizard --help` for subcommands)")
-
-    subparsers.add_parser("commit", help="Wrap git commit and optionally mark it to skip Arga validation")
-    subparsers.add_parser("push", help="Wrap git push and verify skip state when requested")
-    return parser
-
-
-def main() -> None:
-    try:
-        if len(sys.argv) > 1 and sys.argv[1] == "commit":
-            exit_code = run_commit_cli(sys.argv[2:])
-        elif len(sys.argv) > 1 and sys.argv[1] == "push":
-            exit_code = run_push_cli(sys.argv[2:])
-        elif len(sys.argv) > 1 and sys.argv[1] == "validate":
-            exit_code = run_validate_cli(sys.argv[2:])
-        elif len(sys.argv) > 1 and sys.argv[1] == "wizard":
-            exit_code = run_wizard_cli(sys.argv[2:])
-        else:
-            parser = build_parser()
-            args = parser.parse_args()
-            exit_code = args.func(args)
-    except CliError as exc:
-        print(str(exc), file=sys.stderr)
-        raise SystemExit(1) from exc
-    except httpx.HTTPError as exc:
-        print(f"Network error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
-    _check_for_update()
-    raise SystemExit(exit_code)
-
-
-if __name__ == "__main__":
-    main()
+def _add_saved_test_parsers(subparsers: argparse._SubPa

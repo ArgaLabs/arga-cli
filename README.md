@@ -71,6 +71,9 @@ Run a sandbox preview for a branch:
 
 ```bash
 arga previews sandboxes run --repo arga-labs/app --branch feature/demo --twins slack,jira,linear
+arga previews sandboxes status <sandbox_id>
+arga previews sandboxes logs <sandbox_id>
+arga previews sandboxes teardown <sandbox_id>
 ```
 
 Provision twins directly:
@@ -78,7 +81,6 @@ Provision twins directly:
 ```bash
 arga previews twins list
 arga previews twins provision --twins gitlab,linear --ttl 60 --wait
-arga previews twins reset <run_id>
 arga previews twins status <run_id>
 arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>
@@ -113,6 +115,8 @@ Inspect or update automatic validation settings:
 arga previews pr-checks install arga-labs/validation-server
 arga previews pr-checks config arga-labs/validation-server
 arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
+arga previews pr-checks enabled
+arga previews pr-checks disable arga-labs/validation-server --trigger branch
 ```
 
 List and inspect recent validation runs:
@@ -142,26 +146,31 @@ arga logout
 
 ```bash
 arga previews sandboxes run --repo arga-labs/app --branch feature/demo
+arga previews sandboxes status <sandbox_id>
+arga previews sandboxes logs <sandbox_id>
+arga previews sandboxes teardown <sandbox_id>
 arga previews pr-checks run --repo arga-labs/validation-server --pr 182
 arga previews twins list
 arga previews twins provision --twins slack,jira,linear,gitlab --ttl 60 --wait
 arga previews twins status <run_id>
-arga previews twins reset <run_id>
 arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>
 arga previews twins teardown <run_id>
 arga previews pr-checks install arga-labs/validation-server
 arga previews pr-checks config arga-labs/validation-server
 arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
+arga previews pr-checks enabled
+arga previews pr-checks enable arga-labs/validation-server --trigger branch
+arga previews pr-checks disable arga-labs/validation-server --trigger branch
 ```
 
-- `arga previews sandboxes run` starts a branch-backed sandbox preview. Use `--twins` and `--scenario-id` to include seeded twins.
+- `arga previews sandboxes run` starts a branch-backed or PR-backed sandbox preview. Use `--twins`, `--scenario-id`, `--ttl`, and repeated `--env KEY=VALUE` entries to shape the environment.
+- `arga previews sandboxes status/logs/teardown` inspect readiness, stream lifecycle events, or end a sandbox preview.
 - `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
 - `arga previews twins list` shows the supported twin catalog from `validation-server`.
 - `arga previews twins provision` provisions twins without running a browser test. Use `--scenario-id` or `--scenario-prompt` to seed them, and `--private` to keep them behind proxy auth.
-- `arga previews twins reset` replays the provision-time seed baseline (state reset, not infra restart). For long-lived scenario environments, use the scenario reseed APIs instead.
 - `arga previews twins extend` / `lock` / `teardown` adjust TTL, disable public access, or end the quickstart session.
-- `arga previews pr-checks install/config/config-set` manage automatic PR check settings.
+- `arga previews pr-checks install/config/config-set/enabled/enable/disable` manage automatic PR check settings.
 
 `arga validate pr` remains as a compatibility alias for PR checks.
 
