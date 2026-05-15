@@ -115,6 +115,8 @@ Inspect or update automatic validation settings:
 arga previews pr-checks install arga-labs/validation-server
 arga previews pr-checks config arga-labs/validation-server
 arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
+arga previews pr-checks enabled
+arga previews pr-checks disable arga-labs/validation-server --trigger branch
 ```
 
 List and inspect recent validation runs:
@@ -157,6 +159,9 @@ arga previews twins teardown <run_id>
 arga previews pr-checks install arga-labs/validation-server
 arga previews pr-checks config arga-labs/validation-server
 arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
+arga previews pr-checks enabled
+arga previews pr-checks enable arga-labs/validation-server --trigger branch
+arga previews pr-checks disable arga-labs/validation-server --trigger branch
 ```
 
 - `arga previews sandboxes run` starts a branch-backed or PR-backed sandbox preview. Use `--twins`, `--scenario-id`, `--ttl`, and repeated `--env KEY=VALUE` entries to shape the environment.
@@ -165,9 +170,9 @@ arga previews pr-checks config-set arga-labs/validation-server --trigger branch 
 - `arga previews twins list` shows the supported twin catalog from `validation-server`.
 - `arga previews twins provision` provisions twins without running a browser test. Use `--scenario-id` or `--scenario-prompt` to seed them, and `--private` to keep them behind proxy auth.
 - `arga previews twins extend` / `lock` / `teardown` adjust TTL, disable public access, or end the quickstart session.
-- `arga previews pr-checks install/config/config-set` manage automatic PR check settings.
+- `arga previews pr-checks install/config/config-set/enabled/enable/disable` manage automatic PR check settings.
 
-`arga validate pr` remains as a compatibility alias for PR checks.
+`arga validate` remains as a compatibility alias for older PR-check commands. New PR-check management commands are available only under `arga previews pr-checks`.
 
 ### Test Runner
 

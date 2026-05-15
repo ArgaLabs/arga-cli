@@ -635,6 +635,16 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to load validation config")
 
+    def list_enabled_github_validations(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/validation/github/enabled",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to load enabled PR check configs")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /validation/github/enabled")
+        return payload
+
     def save_github_validation_config(
         self,
         *,
@@ -656,6 +666,20 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to save validation config")
+
+    def toggle_github_validation_config(
+        self,
+        *,
+        repo: str,
+        trigger_mode: str,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        response = self._client.patch(
+            f"{self._api_url}/validation/github/config",
+            json={"repo": repo, "trigger_mode": trigger_mode, "enabled": enabled},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to update validation config")
 
     def _auth_headers(self) -> dict[str, str]:
         if not self._api_key:
@@ -1757,7 +1781,6 @@ def _build_validate_config_set_parser() -> argparse.ArgumentParser:
     parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
     return parser
 
-
 def _bool_label(value: bool) -> str:
     return "yes" if value else "no"
 
@@ -1775,6 +1798,13 @@ def _print_validation_config(payload: dict[str, Any]) -> None:
     print(f"Branch: {payload.get('branch') or '-'}")
     print(f"Default Branch: {payload.get('default_branch') or '-'}")
     print(f"PR Comments: {_comments_label(bool(payload.get('comment_on_pr', True)))}")
+
+
+def _print_enabled_validation_configs(configs: list[dict[str, Any]]) -> None:
+    for index, payload in enumerate(configs):
+        if index:
+            print()
+        _print_validation_config(payload)
 
 
 def run_validate_install(args: argparse.Namespace) -> int:
@@ -1826,6 +1856,56 @@ def run_validate_config_set(args: argparse.Namespace) -> int:
     print("Saved validation config.\n")
     _print_validation_config(payload)
     return 0
+
+
+def run_validate_enabled(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.list_enabled_github_validations()
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload))
+        return 0
+
+    if not payload:
+        print("No enabled PR check configs found.")
+        return 0
+
+    _print_enabled_validation_configs(payload)
+    return 0
+
+
+def _run_validate_toggle(args: argparse.Namespace, *, enabled: bool) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.toggle_github_validation_config(
+            repo=args.repo,
+            trigger_mode=args.trigger,
+            enabled=enabled,
+        )
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload))
+        return 0
+
+    action = "Enabled" if enabled else "Disabled"
+    print(f"{action} PR checks.\n")
+    _print_validation_config(payload)
+    return 0
+
+
+def run_validate_enable(args: argparse.Namespace) -> int:
+    return _run_validate_toggle(args, enabled=True)
+
+
+def run_validate_disable(args: argparse.Namespace) -> int:
+    return _run_validate_toggle(args, enabled=False)
 
 
 def run_mcp_install(args: argparse.Namespace) -> int:
@@ -3255,6 +3335,32 @@ def build_parser() -> argparse.ArgumentParser:
     pr_checks_config_set_parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
     pr_checks_config_set_parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
     pr_checks_config_set_parser.set_defaults(func=run_validate_config_set)
+    pr_checks_enabled_parser = pr_checks_subparsers.add_parser("enabled", help="List enabled PR check configs")
+    pr_checks_enabled_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    pr_checks_enabled_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    pr_checks_enabled_parser.set_defaults(func=run_validate_enabled)
+    pr_checks_enable_parser = pr_checks_subparsers.add_parser("enable", help="Enable an existing PR check config")
+    pr_checks_enable_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    pr_checks_enable_parser.add_argument("repo", help="Repository in owner/repo format")
+    pr_checks_enable_parser.add_argument(
+        "--trigger",
+        choices=("pr", "branch"),
+        default="pr",
+        help="Configured validation trigger mode to enable",
+    )
+    pr_checks_enable_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    pr_checks_enable_parser.set_defaults(func=run_validate_enable)
+    pr_checks_disable_parser = pr_checks_subparsers.add_parser("disable", help="Disable an existing PR check config")
+    pr_checks_disable_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    pr_checks_disable_parser.add_argument("repo", help="Repository in owner/repo format")
+    pr_checks_disable_parser.add_argument(
+        "--trigger",
+        choices=("pr", "branch"),
+        default="pr",
+        help="Configured validation trigger mode to disable",
+    )
+    pr_checks_disable_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    pr_checks_disable_parser.set_defaults(func=run_validate_disable)
 
     twins_parser = previews_subparsers.add_parser("twins", help="Manage twin provisioning")
     twins_subparsers = twins_parser.add_subparsers(dest="twins_command", required=True)

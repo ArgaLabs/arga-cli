@@ -109,6 +109,141 @@ def test_validate_config_set_merges_unspecified_values(monkeypatch, capsys) -> N
     assert "PR Comments: on" in output
 
 
+def test_pr_checks_enabled_lists_current_repo_configs(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    def fake_list(self):
+        return [
+            {
+                "repo": "arga-labs/validation-server",
+                "installed": True,
+                "installation_id": "inst_123",
+                "enabled": True,
+                "trigger_mode": "branch",
+                "branch": "main",
+                "default_branch": "main",
+                "comment_on_pr": False,
+            },
+            {
+                "repo": "arga-labs/demo-app",
+                "installed": True,
+                "installation_id": "inst_456",
+                "enabled": True,
+                "trigger_mode": "pr",
+                "branch": None,
+                "default_branch": "main",
+                "comment_on_pr": True,
+            },
+        ]
+
+    monkeypatch.setattr(main.ApiClient, "list_enabled_github_validations", fake_list)
+
+    args = main.build_parser().parse_args(["previews", "pr-checks", "enabled"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Repository: arga-labs/validation-server" in output
+    assert "Repository: arga-labs/demo-app" in output
+    assert "Trigger Mode: branch" in output
+    assert "Trigger Mode: pr" in output
+
+
+def test_pr_checks_enabled_supports_json(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    monkeypatch.setattr(
+        main.ApiClient,
+        "list_enabled_github_validations",
+        lambda self: [{"repo": "arga-labs/validation-server", "trigger_mode": "pr", "enabled": True}],
+    )
+
+    args = main.build_parser().parse_args(["previews", "pr-checks", "enabled", "--json"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert '"repo": "arga-labs/validation-server"' in output
+
+
+def test_pr_checks_enable_toggles_existing_config(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, object] = {}
+
+    def fake_toggle(self, *, repo: str, trigger_mode: str, enabled: bool):
+        captured["repo"] = repo
+        captured["trigger_mode"] = trigger_mode
+        captured["enabled"] = enabled
+        return {
+            "repo": repo,
+            "installed": True,
+            "installation_id": "inst_123",
+            "enabled": enabled,
+            "trigger_mode": trigger_mode,
+            "branch": None,
+            "default_branch": "main",
+            "comment_on_pr": True,
+        }
+
+    monkeypatch.setattr(main.ApiClient, "toggle_github_validation_config", fake_toggle)
+
+    args = main.build_parser().parse_args(
+        ["previews", "pr-checks", "enable", "arga-labs/validation-server", "--trigger", "branch"]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {
+        "repo": "arga-labs/validation-server",
+        "trigger_mode": "branch",
+        "enabled": True,
+    }
+    assert "Enabled PR checks." in output
+    assert "Enabled: yes" in output
+
+
+def test_pr_checks_disable_toggles_existing_config(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, object] = {}
+
+    def fake_toggle(self, *, repo: str, trigger_mode: str, enabled: bool):
+        captured["repo"] = repo
+        captured["trigger_mode"] = trigger_mode
+        captured["enabled"] = enabled
+        return {
+            "repo": repo,
+            "installed": True,
+            "installation_id": "inst_123",
+            "enabled": enabled,
+            "trigger_mode": trigger_mode,
+            "branch": "main",
+            "default_branch": "main",
+            "comment_on_pr": False,
+        }
+
+    monkeypatch.setattr(main.ApiClient, "toggle_github_validation_config", fake_toggle)
+
+    args = main.build_parser().parse_args(
+        ["previews", "pr-checks", "disable", "arga-labs/validation-server", "--trigger", "branch"]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {
+        "repo": "arga-labs/validation-server",
+        "trigger_mode": "branch",
+        "enabled": False,
+    }
+    assert "Disabled PR checks." in output
+    assert "Enabled: no" in output
+
+
 def test_main_dispatches_validate_wrapper_before_argparse(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
