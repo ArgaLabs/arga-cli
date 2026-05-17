@@ -80,7 +80,7 @@ Provision twins directly:
 
 ```bash
 arga previews twins list
-arga previews twins provision --twins gitlab,linear --ttl 60 --wait
+arga previews twins provision --twins salesforce,gitlab,linear --ttl 60 --wait
 arga previews twins status <run_id>
 arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>
@@ -151,7 +151,7 @@ arga previews sandboxes logs <sandbox_id>
 arga previews sandboxes teardown <sandbox_id>
 arga previews pr-checks run --repo arga-labs/validation-server --pr 182
 arga previews twins list
-arga previews twins provision --twins slack,jira,linear,gitlab --ttl 60 --wait
+arga previews twins provision --twins slack,jira,linear,gitlab,salesforce --ttl 60 --wait
 arga previews twins status <run_id>
 arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>

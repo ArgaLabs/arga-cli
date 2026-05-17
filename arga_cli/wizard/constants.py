@@ -85,6 +85,12 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.box.com", "upload.box.com", "app.box.com"],
         "show_in_ui": False,
     },
+    "salesforce": {
+        "label": "Salesforce",
+        "port": 12125,
+        "intercept_domains": ["login.salesforce.com", "test.salesforce.com", "my.salesforce.com"],
+        "show_in_ui": False,
+    },
     "google_calendar": {
         "label": "Google Calendar",
         "port": 12117,
@@ -229,6 +235,40 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
             "BOX_DEVELOPER_TOKEN": "box-developer-token",
         },
     },
+    "salesforce": {
+        "token_vars": [
+            "SALESFORCE_ACCESS_TOKEN",
+            "SALESFORCE_TOKEN",
+            "SF_ACCESS_TOKEN",
+            "SFDC_ACCESS_TOKEN",
+            "SALESFORCE_CLIENT_ID",
+            "SALESFORCE_CONSUMER_KEY",
+        ],
+        "url_vars": [
+            "SALESFORCE_INSTANCE_URL",
+            "SALESFORCE_API_BASE_URL",
+            "SALESFORCE_BASE_URL",
+            "SALESFORCE_LOGIN_URL",
+            "SF_INSTANCE_URL",
+            "SFDX_INSTANCE_URL",
+        ],
+        "secret_vars": [
+            "SALESFORCE_CLIENT_SECRET",
+            "SALESFORCE_CONSUMER_SECRET",
+            "SALESFORCE_PASSWORD",
+            "SALESFORCE_SECURITY_TOKEN",
+        ],
+        "defaults": {
+            "SALESFORCE_ACCESS_TOKEN": "00D000000000001!salesforce-twin-token",
+            "SALESFORCE_TOKEN": "00D000000000001!salesforce-twin-token",
+            "SF_ACCESS_TOKEN": "00D000000000001!salesforce-twin-token",
+            "SFDC_ACCESS_TOKEN": "00D000000000001!salesforce-twin-token",
+            "SALESFORCE_CLIENT_ID": "salesforce-twin-client-id",
+            "SALESFORCE_CONSUMER_KEY": "salesforce-twin-client-id",
+            "SALESFORCE_CLIENT_SECRET": "salesforce-twin-client-secret",
+            "SALESFORCE_CONSUMER_SECRET": "salesforce-twin-client-secret",
+        },
+    },
     "google_calendar": {
         "token_vars": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_CALENDAR_TOKEN", "GOOGLE_ACCESS_TOKEN"],
         "url_vars": ["GOOGLE_CALENDAR_API_URL"],
@@ -364,6 +404,23 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "glpat-gitlab-twin-token",
         "confidence": "high",
     },
+    # Salesforce
+    {
+        "twin": "salesforce",
+        "label": "Salesforce access token/session ID (00D...!...)",
+        "pattern": r"^00D[A-Za-z0-9]{12,15}![A-Za-z0-9._-]+",
+        "category": "token",
+        "default_value": "00D000000000001!salesforce-twin-token",
+        "confidence": "high",
+    },
+    {
+        "twin": "salesforce",
+        "label": "Salesforce connected app consumer key (3MVG...)",
+        "pattern": r"^3MVG[A-Za-z0-9._-]+",
+        "category": "token",
+        "default_value": "salesforce-twin-client-id",
+        "confidence": "medium",
+    },
     # Linear
     {
         "twin": "linear",
@@ -448,6 +505,11 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         'Enterprise: "Box Twin Enterprise" (id: 11446498)',
         "File/folder management ready",
         "Webhook and event stream support",
+    ],
+    "salesforce": [
+        "Salesforce REST API emulator ready",
+        "Supports accounts, contacts, cases, email templates, search, actions, composite, and bulk routes",
+        "Access token: 00D000000000001!salesforce-twin-token",
     ],
     "google_calendar": [
         "Calendar v3 API emulator ready",
