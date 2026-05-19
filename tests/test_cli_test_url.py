@@ -69,7 +69,7 @@ def test_test_url_command_prints_run_id(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert "Starting validation..." in output
+    assert "Starting test run..." in output
     assert "Run ID: run_3421" in output
     assert "Status: queued" in output
 

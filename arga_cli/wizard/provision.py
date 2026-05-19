@@ -41,7 +41,7 @@ def provision_twins(
         payload["scenario_prompt"] = scenario_prompt
 
     response = client._client.post(
-        f"{client._api_url}/validate/twins/provision",
+        f"{client._api_url}/twin-runs",
         json=payload,
         headers=client._auth_headers(),
     )
@@ -56,7 +56,7 @@ def provision_twins(
 
     while time.monotonic() < deadline:
         status_response = client._client.get(
-            f"{client._api_url}/validate/twins/provision/{run_id}/status",
+            f"{client._api_url}/twin-runs/{run_id}",
             headers=client._auth_headers(),
         )
         status = client._parse_json(status_response, f"Failed to check provisioning status for run {run_id}")
