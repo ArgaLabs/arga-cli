@@ -70,11 +70,11 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
     def fake_get(url: str, *, headers: dict[str, str], params: dict[str, object] | None = None):
         captured.append(("GET", url, params))
         payload: object = [{"name": "linear", "label": "Linear", "kind": "backend", "show_in_ui": True}]
-        if url.endswith("/status"):
+        if url.endswith("/twin-runs/run_123"):
             payload = {"run_id": "run_123", "status": "ready"}
-        elif "/sandboxes/" in url and url.endswith("/logs"):
+        elif "/sandbox-runs/" in url and url.endswith("/logs"):
             payload = {"sandbox_id": "sandbox_123", "logs": []}
-        elif "/sandboxes/" in url:
+        elif "/sandbox-runs/" in url:
             payload = {"sandbox_id": "sandbox_123", "status": "ready", "twins": {}}
         return FakeResponse(payload)
 
@@ -84,7 +84,7 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
 
     def fake_post(url: str, *, headers: dict[str, str], json: dict[str, object] | None = None):
         captured.append(("POST", url, json))
-        if url.endswith("/sandboxes"):
+        if url.endswith("/sandbox-runs"):
             return FakeResponse({"sandbox_id": "sandbox_123", "status": "queued", "twins": {}})
         return FakeResponse({"status": "ok", "run_id": "run_123", "ttl_minutes": 75, "is_public": False})
 
@@ -121,7 +121,7 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
     assert captured == [
         (
             "POST",
-            "https://api.argalabs.com/sandboxes",
+            "https://api.argalabs.com/sandbox-runs",
             {
                 "repo": "arga-labs/app",
                 "branch": "feature/demo",
@@ -131,13 +131,13 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
                 "env": {"FEATURE_FLAG": "on"},
             },
         ),
-        ("GET", "https://api.argalabs.com/sandboxes/sandbox_123", None),
-        ("GET", "https://api.argalabs.com/sandboxes/sandbox_123/logs", None),
-        ("DELETE", "https://api.argalabs.com/sandboxes/sandbox_123", None),
-        ("GET", "https://api.argalabs.com/validate/twins", None),
+        ("GET", "https://api.argalabs.com/sandbox-runs/sandbox_123", None),
+        ("GET", "https://api.argalabs.com/sandbox-runs/sandbox_123/logs", None),
+        ("DELETE", "https://api.argalabs.com/sandbox-runs/sandbox_123", None),
+        ("GET", "https://api.argalabs.com/twins", None),
         (
             "POST",
-            "https://api.argalabs.com/validate/twins/provision",
+            "https://api.argalabs.com/twin-runs",
             {
                 "twins": ["linear"],
                 "ttl_minutes": 75,
@@ -147,15 +147,199 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
                 "public": False,
             },
         ),
-        ("GET", "https://api.argalabs.com/validate/twins/provision/run_123/status", None),
+        ("GET", "https://api.argalabs.com/twin-runs/run_123", None),
         (
             "POST",
-            "https://api.argalabs.com/validate/twins/provision/run_123/extend",
+            "https://api.argalabs.com/twin-runs/run_123/extend",
             {"ttl_minutes": 75},
         ),
-        ("POST", "https://api.argalabs.com/validate/twins/provision/run_123/teardown", None),
-        ("POST", "https://api.argalabs.com/validate/twins/provision/run_123/lock", None),
+        ("POST", "https://api.argalabs.com/twin-runs/run_123/teardown", None),
+        ("POST", "https://api.argalabs.com/twin-runs/run_123/lock", None),
     ]
+
+
+def test_scenario_presets_use_public_presets_endpoint(monkeypatch, capsys) -> None:
+    client = main.ApiClient("https://api.argalabs.com")
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return [
+                {
+                    "id": "preset_checkout",
+                    "name": "Checkout",
+                    "description": "Checkout preset",
+                    "twins": ["stripe"],
+                    "tags": ["preset", "payments"],
+                    "is_preset": True,
+                }
+            ]
+
+    def fake_get(url: str, *, params: dict[str, str]):
+        captured["url"] = url
+        captured["params"] = params
+        return FakeResponse()
+
+    monkeypatch.setattr(client._client, "get", fake_get)
+    try:
+        presets = client.list_scenario_presets(twin="stripe", tag="payments")
+    finally:
+        client.close()
+
+    assert captured == {
+        "url": "https://api.argalabs.com/scenarios/presets",
+        "params": {"twin": "stripe", "tag": "payments"},
+    }
+    assert presets[0]["id"] == "preset_checkout"
+
+    monkeypatch.setattr(main, "load_api_key", lambda: (_ for _ in ()).throw(AssertionError("auth not required")))
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main.ApiClient, "list_scenario_presets", lambda self, *, twin=None, tag=None: presets)
+
+    args = main.build_parser().parse_args(["test-runner", "scenarios", "presets", "--twin", "stripe"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "preset_checkout  Checkout (preset)" in output
+    assert "twins: stripe" in output
+
+
+def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: list[tuple[str, dict[str, object] | None]] = []
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {"id": "runner_run_123", "status": "queued", "sandbox_id": "sandbox_123"}
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, object] | None = None):
+        captured.append((url, json))
+        return FakeResponse()
+
+    monkeypatch.setattr(client._client, "post", fake_post)
+    try:
+        client.create_demo_run(prompt="Smoke checkout", sandbox_id="sandbox_123")
+        client.rerun_demo_run("runner_run_123", sandbox_id="sandbox_123", prompt="Retry checkout")
+        client.run_demo_test("test_123", sandbox_id="sandbox_123", prompt="Run saved checkout")
+    finally:
+        client.close()
+
+    assert captured == [
+            (
+                "https://api.argalabs.com/test-runs",
+                {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
+            ),
+            (
+                "https://api.argalabs.com/test-runs/runner_run_123/rerun",
+                {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
+            ),
+            (
+                "https://api.argalabs.com/tests/test_123/run",
+                {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
+            ),
+    ]
+
+
+def test_test_runner_runs_url_accepts_sandbox_id(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "get_me", lambda self: {"billing_plan": "team"})
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, object] = {}
+
+    def fake_create(self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None):
+        captured.update({"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config})
+        return {"id": "runner_run_123", "status": "queued", "sandbox_id": sandbox_id}
+
+    monkeypatch.setattr(main.ApiClient, "create_demo_run", fake_create)
+
+    args = main.build_parser().parse_args(
+        ["test-runner", "runs", "url", "--sandbox-id", "sandbox_123", "--prompt", "Smoke checkout"]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {
+        "prompt": "Smoke checkout",
+        "start_url": None,
+        "sandbox_id": "sandbox_123",
+        "test_config": None,
+    }
+    assert "Sandbox ID: sandbox_123" in output
+
+
+def test_test_runner_rerun_and_saved_test_accept_sandbox_id(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "get_me", lambda self: {"billing_plan": "team"})
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, dict[str, object]] = {}
+
+    def fake_rerun(
+        self,
+        run_id: str,
+        *,
+        prompt: str | None = None,
+        start_url: str | None = None,
+        sandbox_id: str | None = None,
+    ):
+        captured["rerun"] = {
+            "run_id": run_id,
+            "prompt": prompt,
+            "start_url": start_url,
+            "sandbox_id": sandbox_id,
+        }
+        return {"id": "runner_rerun_123", "status": "queued", "sandbox_id": sandbox_id}
+
+    def fake_run_test(
+        self,
+        test_id: str,
+        *,
+        start_url: str | None = None,
+        prompt: str | None = None,
+        twins: list[str] | None = None,
+        ttl_minutes: int | None = None,
+        session_id: str | None = None,
+        sandbox_id: str | None = None,
+    ):
+        captured["saved_test"] = {
+            "test_id": test_id,
+            "start_url": start_url,
+            "prompt": prompt,
+            "twins": twins,
+            "ttl_minutes": ttl_minutes,
+            "session_id": session_id,
+            "sandbox_id": sandbox_id,
+        }
+        return {"id": "runner_test_123", "status": "queued", "sandbox_id": sandbox_id}
+
+    monkeypatch.setattr(main.ApiClient, "rerun_demo_run", fake_rerun)
+    monkeypatch.setattr(main.ApiClient, "run_demo_test", fake_run_test)
+
+    rerun_args = main.build_parser().parse_args(
+        ["test-runner", "runs", "rerun", "runner_run_123", "--sandbox-id", "sandbox_123"]
+    )
+    rerun_exit = rerun_args.func(rerun_args)
+    rerun_output = capsys.readouterr().out
+
+    test_args = main.build_parser().parse_args(
+        ["test-runner", "tests", "run", "test_123", "--sandbox-id", "sandbox_123"]
+    )
+    test_exit = test_args.func(test_args)
+    test_output = capsys.readouterr().out
+
+    assert rerun_exit == 0
+    assert test_exit == 0
+    assert captured["rerun"]["sandbox_id"] == "sandbox_123"
+    assert captured["saved_test"]["sandbox_id"] == "sandbox_123"
+    assert "Sandbox ID: sandbox_123" in rerun_output
+    assert "Sandbox ID: sandbox_123" in test_output
 
 
 def test_test_runner_tests_run_uses_saved_test_endpoint(monkeypatch, capsys) -> None:
@@ -179,6 +363,7 @@ def test_test_runner_tests_run_uses_saved_test_endpoint(monkeypatch, capsys) -> 
         twins: list[str] | None = None,
         ttl_minutes: int | None = None,
         session_id: str | None = None,
+        sandbox_id: str | None = None,
     ):
         captured.update(
             {
@@ -188,6 +373,7 @@ def test_test_runner_tests_run_uses_saved_test_endpoint(monkeypatch, capsys) -> 
                 "twins": twins,
                 "ttl_minutes": ttl_minutes,
                 "session_id": session_id,
+                "sandbox_id": sandbox_id,
             }
         )
         return {"id": "demo_run_1", "status": "queued", "start_url": start_url}
@@ -219,6 +405,7 @@ def test_test_runner_tests_run_uses_saved_test_endpoint(monkeypatch, capsys) -> 
         "twins": ["slack", "jira"],
         "ttl_minutes": 60,
         "session_id": None,
+        "sandbox_id": None,
     }
     assert "Saved test run started." in output
     assert "Run ID: demo_run_1" in output
@@ -255,9 +442,17 @@ def test_test_runner_runs_url_accepts_test_config(monkeypatch, tmp_path, capsys)
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
 
-    def fake_create(self, *, prompt: str, start_url: str | None = None, test_config: dict[str, object] | None = None):
+    def fake_create(
+        self,
+        *,
+        prompt: str,
+        start_url: str | None = None,
+        sandbox_id: str | None = None,
+        test_config: dict[str, object] | None = None,
+    ):
         captured["prompt"] = prompt
         captured["start_url"] = start_url
+        captured["sandbox_id"] = sandbox_id
         captured["test_config"] = test_config
         return {"id": "demo_run_config", "status": "queued"}
 
@@ -281,6 +476,7 @@ def test_test_runner_runs_url_accepts_test_config(monkeypatch, tmp_path, capsys)
     assert exit_code == 0
     assert captured["prompt"] == "Run checkout"
     assert captured["start_url"] == "https://example.com"
+    assert captured["sandbox_id"] is None
     assert isinstance(captured["test_config"], dict)
     assert "Run ID: demo_run_config" in output
 

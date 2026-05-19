@@ -84,6 +84,7 @@ arga previews twins provision --twins salesforce,gitlab,linear --ttl 60 --wait
 arga previews twins status <run_id>
 arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>
+arga previews twins reset <run_id>
 arga previews twins teardown <run_id>
 ```
 
@@ -92,6 +93,7 @@ Create and run saved tests:
 ```bash
 arga test-runner tests create --name "Checkout" --run-id <demo_run_id> --repo arga-labs/app --ci
 arga test-runner tests run <test_id> --url https://preview.example.com
+arga test-runner tests run <test_id> --sandbox-id <sandbox_id>
 ```
 
 Any of these commands accept `--json` for machine-parseable output:
@@ -113,7 +115,7 @@ Inspect or update automatic validation settings:
 
 ```bash
 arga previews pr-checks install arga-labs/validation-server
-arga previews pr-checks config arga-labs/validation-server
+arga previews pr-checks config arga-labs/validation-server --trigger branch
 arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
 arga previews pr-checks enabled
 arga previews pr-checks disable arga-labs/validation-server --trigger branch
@@ -157,7 +159,7 @@ arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>
 arga previews twins teardown <run_id>
 arga previews pr-checks install arga-labs/validation-server
-arga previews pr-checks config arga-labs/validation-server
+arga previews pr-checks config arga-labs/validation-server --trigger branch
 arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
 arga previews pr-checks enabled
 arga previews pr-checks enable arga-labs/validation-server --trigger branch
@@ -169,7 +171,7 @@ arga previews pr-checks disable arga-labs/validation-server --trigger branch
 - `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
 - `arga previews twins list` shows the supported twin catalog from `validation-server`.
 - `arga previews twins provision` provisions twins without running a browser test. Use `--scenario-id` or `--scenario-prompt` to seed them, and `--private` to keep them behind proxy auth.
-- `arga previews twins extend` / `lock` / `teardown` adjust TTL, disable public access, or end the quickstart session.
+- `arga previews twins extend` / `lock` / `reset` / `teardown` adjust TTL, disable public access, reset seeded state, or end the quickstart session.
 - `arga previews pr-checks install/config/config-set/enabled/enable/disable` manage automatic PR check settings.
 
 `arga validate` remains as a compatibility alias for older PR-check commands. New PR-check management commands are available only under `arga previews pr-checks`.
@@ -184,16 +186,19 @@ arga test-runner tests import --file saved-test.json
 arga test-runner tests edit <test_id>
 arga test-runner tests run <test_id> --url https://preview.example.com
 arga test-runner runs url --url https://demo-app.com --prompt "test login flow"
+arga test-runner runs url --sandbox-id <sandbox_id> --prompt "test login flow"
 arga test-runner runs list
 arga test-runner runs get <run_id>
 arga test-runner runs logs <run_id>
-arga test-runner runs rerun <run_id>
+arga test-runner runs rerun <run_id> --sandbox-id <sandbox_id>
 arga test-runner runs message <run_id> "Use test@example.com"
 ```
 
-- `scenarios` supports list/get/create/import/export/update/delete for twin seed scenarios.
+- `scenarios` supports list/presets/get/create/import/export/update/delete for twin seed scenarios.
+- `arga test-runner scenarios presets` lists built-in presets from the public presets API without requiring login.
 - `tests` supports list/get/create/import/export/edit/delete/run for saved browser tests.
 - `runs` starts URL runs and inspects live demo-runner history/events.
+- `--sandbox-id` can attach URL runs, reruns, and saved-test runs to an existing sandbox preview.
 - `arga test url` and `arga scenarios ...` remain as compatibility aliases.
 
 ### TestConfig JSON

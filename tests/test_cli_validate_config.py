@@ -33,8 +33,9 @@ def test_validate_config_prints_current_settings(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
 
-    def fake_get(self, *, repo: str):
+    def fake_get(self, *, repo: str, trigger_mode: str = "pr"):
         assert repo == "arga-labs/validation-server"
+        assert trigger_mode == "pr"
         return {
             "repo": "arga-labs/validation-server",
             "installed": True,
@@ -58,13 +59,46 @@ def test_validate_config_prints_current_settings(monkeypatch, capsys) -> None:
     assert "PR Comments: off" in output
 
 
+def test_pr_checks_config_reads_selected_trigger(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, str] = {}
+
+    def fake_get(self, *, repo: str, trigger_mode: str = "pr"):
+        captured["repo"] = repo
+        captured["trigger_mode"] = trigger_mode
+        return {
+            "repo": repo,
+            "installed": True,
+            "installation_id": "inst_123",
+            "enabled": True,
+            "trigger_mode": trigger_mode,
+            "branch": "main",
+            "default_branch": "main",
+            "comment_on_pr": False,
+        }
+
+    monkeypatch.setattr(main.ApiClient, "get_github_validation_config", fake_get)
+
+    args = main.build_parser().parse_args(
+        ["previews", "pr-checks", "config", "arga-labs/validation-server", "--trigger", "branch"]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {"repo": "arga-labs/validation-server", "trigger_mode": "branch"}
+    assert "Trigger Mode: branch" in output
+
+
 def test_validate_config_set_merges_unspecified_values(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
 
-    def fake_get(self, *, repo: str):
+    def fake_get(self, *, repo: str, trigger_mode: str = "pr"):
         assert repo == "arga-labs/validation-server"
+        assert trigger_mode == "branch"
         return {
             "repo": "arga-labs/validation-server",
             "installed": True,
@@ -95,7 +129,9 @@ def test_validate_config_set_merges_unspecified_values(monkeypatch, capsys) -> N
     monkeypatch.setattr(main.ApiClient, "get_github_validation_config", fake_get)
     monkeypatch.setattr(main.ApiClient, "save_github_validation_config", fake_save)
 
-    exit_code = main.run_validate_cli(["config", "set", "arga-labs/validation-server", "--comments", "on"])
+    exit_code = main.run_validate_cli(
+        ["config", "set", "arga-labs/validation-server", "--trigger", "branch", "--comments", "on"]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0

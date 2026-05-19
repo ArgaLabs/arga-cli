@@ -21,10 +21,10 @@ def test_validate_pr_command_prints_run_id(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert "Starting PR validation..." in output
+    assert "Starting legacy PR validation..." in output
     assert "Repository: arga-labs/validation-server" in output
     assert "PR: #182" in output
-    assert "Validation run started." in output
+    assert "Legacy validation run started." in output
     assert "Run ID: run_83921" in output
     assert "Status: queued" in output
 
