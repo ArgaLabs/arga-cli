@@ -115,6 +115,12 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.linear.app", "linear.app"],
         "show_in_ui": True,
     },
+    "waterfall": {
+        "label": "Waterfall",
+        "port": 12129,
+        "intercept_domains": ["api.waterfall.io"],
+        "show_in_ui": False,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -302,6 +308,12 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "secret_vars": ["LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
         "defaults": {"LINEAR_API_KEY": "lin_api_twin_owner_personal_key_0001"},
     },
+    "waterfall": {
+        "token_vars": ["WATERFALL_API_KEY"],
+        "url_vars": ["WATERFALL_API_BASE_URL", "WATERFALL_API_URL", "WATERFALL_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {"WATERFALL_API_KEY": "ad18e456-0dd7-45e1-b094-43a0361aedfa"},
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -438,6 +450,15 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "lin_api_twin_owner_personal_key_0001",
         "confidence": "high",
     },
+    # Waterfall
+    {
+        "twin": "waterfall",
+        "label": "Waterfall API key (UUID)",
+        "pattern": r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        "category": "token",
+        "default_value": "ad18e456-0dd7-45e1-b094-43a0361aedfa",
+        "confidence": "medium",
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -532,5 +553,10 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         "Resources: issues, projects, initiatives, documents, milestones, comments",
         "GraphQL endpoint: /graphql",
         "Token: lin_api_twin_owner_personal_key_0001",
+    ],
+    "waterfall": [
+        "Starts empty by default",
+        "Supports company search, people search, enrichment, verification, and account endpoints",
+        "API key: ad18e456-0dd7-45e1-b094-43a0361aedfa",
     ],
 }
