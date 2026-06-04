@@ -208,6 +208,130 @@ def test_scenario_presets_use_public_presets_endpoint(monkeypatch, capsys) -> No
     assert "twins: stripe" in output
 
 
+def test_scenario_environment_api_methods_use_supported_routes(monkeypatch) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: list[tuple[str, str, dict[str, object] | None]] = []
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def __init__(self, payload: object):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    env_payload = {
+        "id": "env_123",
+        "scenario_id": "scenario_123",
+        "run_id": "run_123",
+        "status": "ready",
+        "requested_twins": ["slack"],
+        "public": False,
+        "twins": {},
+    }
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, object] | None = None, timeout=None):
+        captured.append(("POST", url, json))
+        return FakeResponse(env_payload)
+
+    def fake_get(url: str, *, headers: dict[str, str]):
+        captured.append(("GET", url, None))
+        if url.endswith("/scenario-twin-environments"):
+            return FakeResponse([env_payload])
+        if url.endswith("/scenarios/long-runs"):
+            return FakeResponse([{"scenario_id": "scenario_123", "run": {"run_id": "run_123", "status": "ready"}}])
+        return FakeResponse(env_payload)
+
+    def fake_delete(url: str, *, headers: dict[str, str]):
+        captured.append(("DELETE", url, None))
+        return FakeResponse({**env_payload, "status": "deleted"})
+
+    monkeypatch.setattr(client._client, "post", fake_post)
+    monkeypatch.setattr(client._client, "get", fake_get)
+    monkeypatch.setattr(client._client, "delete", fake_delete)
+    try:
+        client.ensure_scenario_twin_environment("scenario_123", twins=["slack"], public=False)
+        client.get_scenario_twin_environment("scenario_123")
+        client.reseed_scenario_twin_environment("scenario_123")
+        client.delete_scenario_twin_environment("scenario_123")
+        client.list_scenario_twin_environments()
+        client.list_scenario_long_runs()
+    finally:
+        client.close()
+
+    assert captured == [
+        (
+            "POST",
+            "https://api.argalabs.com/scenarios/scenario_123/twin-environment",
+            {"public": False, "twins": ["slack"]},
+        ),
+        ("GET", "https://api.argalabs.com/scenarios/scenario_123/twin-environment", None),
+        ("POST", "https://api.argalabs.com/scenarios/scenario_123/twin-environment/reseed", None),
+        ("DELETE", "https://api.argalabs.com/scenarios/scenario_123/twin-environment", None),
+        ("GET", "https://api.argalabs.com/scenario-twin-environments", None),
+        ("GET", "https://api.argalabs.com/scenarios/long-runs", None),
+    ]
+
+
+def test_scenario_environment_commands_parse_and_print(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, object] = {}
+    env_payload = {
+        "id": "env_123",
+        "scenario_id": "scenario_123",
+        "run_id": "run_123",
+        "status": "ready",
+        "requested_twins": ["slack", "jira"],
+        "public": False,
+        "dashboard_url": "https://app.argalabs.com/validate/run_123",
+        "twins": {"slack": {"base_url": "https://pub-run--slack.example.com"}},
+    }
+
+    def fake_ensure(self, scenario_id: str, *, twins: list[str] | None = None, public: bool = True):
+        captured.update({"scenario_id": scenario_id, "twins": twins, "public": public})
+        return env_payload
+
+    monkeypatch.setattr(main.ApiClient, "ensure_scenario_twin_environment", fake_ensure)
+    monkeypatch.setattr(main.ApiClient, "list_scenario_twin_environments", lambda self: [env_payload])
+    monkeypatch.setattr(
+        main.ApiClient,
+        "list_scenario_long_runs",
+        lambda self: [{"scenario_id": "scenario_123", "run": {"run_id": "run_123", "status": "ready"}}],
+    )
+
+    ensure_args = main.build_parser().parse_args(
+        [
+            "test-runner",
+            "scenarios",
+            "environment",
+            "ensure",
+            "scenario_123",
+            "--twins",
+            "slack,jira",
+            "--private",
+        ]
+    )
+    assert ensure_args.func(ensure_args) == 0
+    ensure_output = capsys.readouterr().out
+
+    list_args = main.build_parser().parse_args(["test-runner", "scenarios", "environment", "list"])
+    assert list_args.func(list_args) == 0
+    list_output = capsys.readouterr().out
+
+    long_runs_args = main.build_parser().parse_args(["test-runner", "scenarios", "long-runs", "--json"])
+    assert long_runs_args.func(long_runs_args) == 0
+    long_runs_output = capsys.readouterr().out
+
+    assert captured == {"scenario_id": "scenario_123", "twins": ["slack", "jira"], "public": False}
+    assert "Environment ID: env_123" in ensure_output
+    assert "Public: no" in ensure_output
+    assert "scenario_123" in list_output
+    assert json.loads(long_runs_output)[0]["run"]["run_id"] == "run_123"
+
+
 def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
     client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
     captured: list[tuple[str, dict[str, object] | None]] = []
@@ -232,18 +356,18 @@ def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
         client.close()
 
     assert captured == [
-            (
-                "https://api.argalabs.com/test-runs",
-                {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/test-runs/runner_run_123/rerun",
-                {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/tests/test_123/run",
-                {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
-            ),
+        (
+            "https://api.argalabs.com/test-runs",
+            {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/test-runs/runner_run_123/rerun",
+            {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/tests/test_123/run",
+            {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
+        ),
     ]
 
 
@@ -253,8 +377,12 @@ def test_test_runner_runs_url_accepts_sandbox_id(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
 
-    def fake_create(self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None):
-        captured.update({"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config})
+    def fake_create(
+        self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None
+    ):
+        captured.update(
+            {"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config}
+        )
         return {"id": "runner_run_123", "status": "queued", "sandbox_id": sandbox_id}
 
     monkeypatch.setattr(main.ApiClient, "create_demo_run", fake_create)
@@ -620,6 +748,7 @@ def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
     }
     assert "Twin provisioning started." in output
     assert "Run ID: linear_run" in output
+
 
 def test_twins_provision_accepts_gitlab(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
