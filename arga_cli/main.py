@@ -113,60 +113,22 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to load current user")
 
+    def list_cli_devices(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/auth/cli/devices",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list CLI devices")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /auth/cli/devices")
+        return payload
+
     def revoke_cli_device(self, cli_api_key_id: str) -> dict[str, str]:
         response = self._client.post(
             f"{self._api_url}/auth/cli/devices/{cli_api_key_id}/revoke",
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to revoke CLI device")
-
-    def start_url_validation(
-        self,
-        *,
-        url: str,
-        prompt: str | None = None,
-        email: str | None = None,
-        password: str | None = None,
-        ttl_minutes: int | None = None,
-        scenario_id: str | None = None,
-        provision_id: str | None = None,
-        twins: list[str] | None = None,
-        runner_mode: str | None = None,
-        repo: str | None = None,
-        branch: str | None = None,
-        pr_url: str | None = None,
-    ) -> dict[str, str]:
-        payload: dict[str, object] = {"url": url}
-        if prompt is not None:
-            payload["prompt"] = prompt
-        if email or password:
-            payload["credentials"] = {
-                "email": email or "",
-                "password": password or "",
-            }
-        if ttl_minutes is not None:
-            payload["ttl_minutes"] = ttl_minutes
-        if scenario_id:
-            payload["scenario_id"] = scenario_id
-        if provision_id:
-            payload["provision_id"] = provision_id
-        if twins:
-            payload["twins"] = twins
-        if runner_mode:
-            payload["runner_mode"] = runner_mode
-        if repo:
-            payload["repo"] = repo
-        if branch:
-            payload["branch"] = branch
-        if pr_url:
-            payload["pr_url"] = pr_url
-        response = self._client.post(
-            f"{self._api_url}/validate/url-run",
-            json=payload,
-            headers=self._auth_headers(),
-            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
-        )
-        return self._parse_json(response, "Failed to start URL validation")
 
     def list_scenarios(
         self,
@@ -264,83 +226,64 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to delete scenario")
 
-    def start_pr_run(
+    def ensure_scenario_twin_environment(
         self,
+        scenario_id: str,
         *,
-        repo: str,
-        branch: str | None = None,
-        pr_url: str | None = None,
-        frontend_url: str | None = None,
-        context_notes: str | None = None,
-        scenario_prompt: str | None = None,
-        scenario_id: str | None = None,
         twins: list[str] | None = None,
-        session_id: str | None = None,
-        run_type: str = "pr_run",
-        stream: bool = True,
-    ) -> dict[str, str]:
-        payload: dict[str, Any] = {"repo": repo, "run_type": run_type}
-        if branch:
-            payload["branch"] = branch
-        if pr_url:
-            payload["pr_url"] = pr_url
-        if frontend_url:
-            payload["frontend_url"] = frontend_url
-        if context_notes:
-            payload["context_notes"] = context_notes
-        if scenario_prompt:
-            payload["scenario_prompt"] = scenario_prompt
-        if scenario_id:
-            payload["scenario_id"] = scenario_id
+        public: bool = True,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"public": public}
         if twins:
             payload["twins"] = twins
-        if session_id:
-            payload["session_id"] = session_id
-
-        if not stream:
-            response = self._client.post(
-                f"{self._api_url}/validate/pr-run",
-                json=payload,
-                headers=self._auth_headers(),
-            )
-            return self._parse_json(response, "Failed to start preview run")
-
-        with self._client.stream(
-            "POST",
-            f"{self._api_url}/validate/pr-run",
+        response = self._client.post(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment",
             json=payload,
             headers=self._auth_headers(),
             timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
-        ) as response:
-            if not response.is_success:
-                try:
-                    detail_payload = json.loads(response.read().decode("utf-8"))
-                except ValueError as exc:
-                    raise CliError("Failed to start preview run") from exc
-                self._parse_json(
-                    httpx.Response(response.status_code, json=detail_payload),
-                    "Failed to start preview run",
-                )
-            run_id = response.headers.get("X-Run-Id")
-            session_id_header = response.headers.get("X-Session-Id")
-            # Drain the story stream so the server can finish its initial planning work.
-            for _ in response.iter_text():
-                pass
-            return {"run_id": run_id or "unknown", "session_id": session_id_header or "", "status": "generating_story"}
-
-    def start_pr_validation(
-        self,
-        *,
-        repo: str,
-        pr_number: int,
-        context_notes: str | None = None,
-    ) -> dict[str, str]:
-        return self.start_pr_run(
-            repo=repo,
-            pr_url=f"https://github.com/{repo}/pull/{pr_number}",
-            context_notes=context_notes,
-            run_type="pr_run",
         )
+        return self._parse_json(response, "Failed to create scenario twin environment")
+
+    def get_scenario_twin_environment(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load scenario twin environment")
+
+    def reseed_scenario_twin_environment(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment/reseed",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to reseed scenario twin environment")
+
+    def delete_scenario_twin_environment(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.delete(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to delete scenario twin environment")
+
+    def list_scenario_twin_environments(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/scenario-twin-environments",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list scenario twin environments")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /scenario-twin-environments")
+        return payload
+
+    def list_scenario_long_runs(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/scenarios/long-runs",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list scenario long runs")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /scenarios/long-runs")
+        return payload
 
     def create_sandbox(
         self,
@@ -353,6 +296,7 @@ class ApiClient:
         scenario_id: str | None = None,
         ttl_minutes: int | None = None,
         env: dict[str, str] | None = None,
+        app_command: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"repo": repo}
         if branch:
@@ -369,6 +313,8 @@ class ApiClient:
             payload["ttl_minutes"] = ttl_minutes
         if env:
             payload["env"] = env
+        if app_command:
+            payload["app_command"] = app_command
         response = self._client.post(
             f"{self._api_url}/sandbox-runs",
             json=payload,
@@ -397,6 +343,64 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to load sandbox logs")
 
+    def probe_agent_sandbox(self, *, repo: str, branch: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/validate/agent-sandboxes/probe",
+            json={"repo": repo, "branch": branch},
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to probe agent sandbox settings")
+
+    def create_agent_sandbox(
+        self,
+        *,
+        repo: str,
+        branch: str,
+        framework: str = "custom",
+        deploy: dict[str, Any] | None = None,
+        app_env: dict[str, str] | None = None,
+        twins: list[str] | None = None,
+        infra: list[str] | None = None,
+        scenario_prompt: str | None = None,
+        scenario_id: str | None = None,
+        agent: dict[str, Any] | None = None,
+        ttl_minutes: int | None = None,
+        timeouts: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"repo": repo, "branch": branch, "framework": framework}
+        if deploy:
+            payload["deploy"] = deploy
+        if app_env:
+            payload["app_env"] = app_env
+        if twins:
+            payload["twins"] = twins
+        if infra:
+            payload["infra"] = infra
+        if scenario_prompt:
+            payload["scenario_prompt"] = scenario_prompt
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
+        if agent:
+            payload["agent"] = agent
+        if ttl_minutes is not None:
+            payload["ttl_minutes"] = ttl_minutes
+        if timeouts:
+            payload["timeouts"] = timeouts
+        response = self._client.post(
+            f"{self._api_url}/validate/agent-sandboxes",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
+        )
+        return self._parse_json(response, "Failed to create agent sandbox")
+
+    def get_agent_sandbox(self, run_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/validate/agent-sandboxes/{run_id}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load agent sandbox")
+
     def provision_twins_start(
         self,
         *,
@@ -422,7 +426,6 @@ class ApiClient:
     def list_twins(self) -> list[dict[str, Any]]:
         response = self._client.get(
             f"{self._api_url}/twins",
-            headers=self._auth_headers(),
         )
         payload = self._parse_json(response, "Failed to list twins")
         if not isinstance(payload, list):
@@ -478,6 +481,14 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to load run logs")
+
+    def get_run_twin_diagnostics(self, run_id: str, twin_name: str | None = None) -> dict[str, Any]:
+        suffix = f"/twins/{twin_name}/diagnostics" if twin_name else "/twins/diagnostics"
+        response = self._client.get(
+            f"{self._api_url}/runs/{run_id}{suffix}",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load run twin diagnostics")
 
     def list_pr_validation_runs(
         self,
@@ -628,6 +639,21 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to send test runner message")
+
+    def get_demo_run_artifact_url(self, run_id: str, filename: str) -> dict[str, str]:
+        response = self._client.get(
+            f"{self._api_url}/test-runs/{run_id}/artifacts/{filename}",
+            headers=self._auth_headers(),
+            follow_redirects=False,
+        )
+        location = response.headers.get("location") if response.is_redirect else None
+        if location:
+            return {"run_id": run_id, "filename": filename, "url": location}
+        payload = self._parse_json(response, "Failed to load test runner artifact")
+        url = str(payload.get("url") or "").strip()
+        if not url:
+            raise CliError("Unexpected response from /test-runs artifact endpoint")
+        return {"run_id": run_id, "filename": filename, "url": url}
 
     def list_demo_tests(self, *, repo: str | None = None) -> list[dict[str, Any]]:
         params = {"repo_full_name": repo} if repo else None
@@ -988,6 +1014,61 @@ def run_whoami(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_devices_list(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        devices = client.list_cli_devices()
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(devices, indent=2))
+        return 0
+
+    if not devices:
+        print("No CLI devices found.")
+        return 0
+
+    headers = ["ID", "DEVICE", "KEY", "CREATED", "LAST USED", "REVOKED"]
+    rows = [
+        [
+            str(device.get("id") or "-"),
+            str(device.get("device_name") or "-"),
+            str(device.get("key_preview") or "-"),
+            _format_timestamp(device.get("created_at")),
+            _format_timestamp(device.get("last_used_at")),
+            _format_timestamp(device.get("revoked_at")),
+        ]
+        for device in devices
+    ]
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+    return 0
+
+
+def run_devices_revoke(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        result = client.revoke_cli_device(args.device_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+
+    print(f"Device ID: {args.device_id}")
+    print(f"Status: {result.get('status', 'unknown')}")
+    return 0
+
+
 def _resolve_ttl(client: ApiClient, requested_ttl: int | None) -> int | None:
     """Resolve TTL based on user plan. Free users are capped at 10 minutes."""
     FREE_TTL = 10
@@ -1219,17 +1300,49 @@ def _print_twin_mcp_config(config: dict[str, Any]) -> None:
     print(json.dumps(config, indent=2))
 
 
-def _parse_env_assignments(values: list[str] | None) -> dict[str, str]:
-    env: dict[str, str] = {}
+def _parse_key_value_assignments(values: list[str] | None, *, flag_name: str) -> dict[str, str]:
+    assignments: dict[str, str] = {}
     for value in values or []:
         if "=" not in value:
-            raise CliError(f"Invalid --env value: {value!r}. Expected KEY=VALUE.")
+            raise CliError(f"Invalid {flag_name} value: {value!r}. Expected KEY=VALUE.")
         key, raw_value = value.split("=", 1)
         key = key.strip()
         if not key:
-            raise CliError(f"Invalid --env value: {value!r}. Expected KEY=VALUE.")
-        env[key] = raw_value
-    return env
+            raise CliError(f"Invalid {flag_name} value: {value!r}. Expected KEY=VALUE.")
+        assignments[key] = raw_value
+    return assignments
+
+
+def _parse_env_assignments(values: list[str] | None) -> dict[str, str]:
+    return _parse_key_value_assignments(values, flag_name="--env")
+
+
+def _deploy_settings_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    deploy = {
+        "mode": args.deploy_mode,
+        "context_dir": args.context_dir,
+        "dockerfile_path": args.dockerfile,
+        "compose_path": args.compose_file,
+        "app_port": args.port,
+        "app_command": args.app_command or "",
+        "language": args.language,
+        "entrypoint": args.entrypoint or "",
+        "run_command": args.run_command or "",
+        "install_command": args.install_command or "",
+        "adapter": args.adapter or "",
+    }
+    return {key: value for key, value in deploy.items() if value is not None}
+
+
+def _timeouts_from_args(args: argparse.Namespace) -> dict[str, int]:
+    timeouts: dict[str, int] = {}
+    if args.job_timeout:
+        timeouts["job_timeout_seconds"] = args.job_timeout
+    if args.compose_timeout:
+        timeouts["compose_readiness_timeout_seconds"] = args.compose_timeout
+    if args.surface_timeout:
+        timeouts["surface_readiness_timeout_seconds"] = args.surface_timeout
+    return timeouts
 
 
 def _print_sandbox_summary(payload: dict[str, Any], fallback_id: str | None = None) -> None:
@@ -1246,6 +1359,60 @@ def _print_sandbox_summary(payload: dict[str, Any], fallback_id: str | None = No
                 continue
             base_url = twin_payload.get("base_url") or "-"
             print(f"  {twin_name}: {base_url}")
+
+
+def _print_agent_sandbox_summary(payload: dict[str, Any], fallback_run_id: str | None = None) -> None:
+    print(f"Run ID: {payload.get('run_id', fallback_run_id or 'unknown')}")
+    print(f"Status: {payload.get('status', 'unknown')}")
+    print(f"Session ID: {payload.get('session_id') or '-'}")
+    print(f"Dashboard URL: {payload.get('dashboard_url') or '-'}")
+    print(f"Environment URL: {payload.get('environment_url') or '-'}")
+    print(f"Agent URL: {payload.get('agent_url') or '-'}")
+    twins = payload.get("twins")
+    if isinstance(twins, list) and twins:
+        print(f"Twins: {', '.join(str(twin) for twin in twins)}")
+    surface_urls = payload.get("surface_urls")
+    if isinstance(surface_urls, dict) and surface_urls:
+        print("Surfaces:")
+        for name, url in sorted(surface_urls.items()):
+            print(f"  {name}: {url}")
+
+
+def _print_agent_sandbox_probe(payload: dict[str, Any]) -> None:
+    print(f"Repository: {payload.get('repo', '-')}")
+    print(f"Branch: {payload.get('branch', '-')}")
+    settings = payload.get("settings")
+    if not isinstance(settings, dict):
+        return
+    print(f"Framework: {settings.get('framework') or 'custom'}")
+    deploy = settings.get("deploy")
+    if isinstance(deploy, dict):
+        print("Deploy:")
+        for key in (
+            "mode",
+            "context_dir",
+            "dockerfile_path",
+            "compose_path",
+            "app_port",
+            "app_command",
+            "language",
+            "entrypoint",
+            "run_command",
+            "install_command",
+            "adapter",
+        ):
+            value = deploy.get(key)
+            if value not in (None, ""):
+                print(f"  {key}: {value}")
+    for key, label in (("twins", "Twins"), ("infra", "Infra"), ("env_keys", "Env Keys"), ("detected_files", "Files")):
+        values = settings.get(key)
+        if isinstance(values, list) and values:
+            print(f"{label}: {', '.join(str(value) for value in values)}")
+    warnings = settings.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        print("Warnings:")
+        for warning in warnings:
+            print(f"- {warning}")
 
 
 def _print_sandbox_logs(payload: dict[str, Any]) -> None:
@@ -1272,6 +1439,8 @@ def run_test_url(args: argparse.Namespace) -> int:
     _warn_deprecated_alias(args, "arga test-runs url")
     if bool(args.email) != bool(args.password):
         raise CliError("Both --email and --password must be provided together.")
+    if args.email or args.password:
+        raise CliError("Direct URL runs no longer accept --email/--password. Store credentials on a saved test instead.")
 
     scenario_id = getattr(args, "scenario", None)
     test_config: dict[str, Any] | None = None
@@ -1295,13 +1464,17 @@ def run_test_url(args: argparse.Namespace) -> int:
     client = ApiClient(args.api_url, api_key=api_key)
     try:
         ttl_minutes = _resolve_ttl(client, getattr(args, "ttl", None))
+        scenario_prompt: str | None = None
+        if scenario_id and not args.prompt and test_config is None and not sandbox_id:
+            scenario = client.get_scenario(scenario_id)
+            scenario_prompt = str(scenario.get("prompt") or "").strip() or None
+            if not scenario_prompt:
+                raise CliError(f"Scenario {scenario_id} does not have a prompt. Pass --prompt or use --test-config.")
 
-        provision_id: str | None = None
         if twins_arg:
             from arga_cli.wizard.provision import provision_twins
 
             status = provision_twins(client, twins_arg, ttl_minutes=ttl_minutes or 30)
-            provision_id = status.get("run_id")
             _print_twin_env_vars(status)
 
             if not url and not sandbox_id:
@@ -1343,21 +1516,23 @@ def run_test_url(args: argparse.Namespace) -> int:
                     raise CliError("--scenario is not supported with --sandbox-id. Use --prompt or --test-config.")
                 payload = client.create_demo_run(prompt=args.prompt, start_url=url or None, sandbox_id=sandbox_id)
             else:
-                start_kwargs: dict[str, Any] = {
-                    "url": url,
-                    "prompt": args.prompt,
-                    "email": args.email,
-                    "password": args.password,
-                    "ttl_minutes": ttl_minutes,
-                    "scenario_id": scenario_id,
-                    "provision_id": provision_id,
-                    "twins": twins_arg if not provision_id else None,
-                }
-                for key in ("runner_mode", "repo", "branch", "pr_url"):
-                    value = getattr(args, key, None)
-                    if value:
-                        start_kwargs[key] = value
-                payload = client.start_url_validation(**start_kwargs)
+                if getattr(args, "ttl", None) is not None and not twins_arg:
+                    raise CliError("--ttl is only supported for URL runs when --twins provisions a twin environment.")
+                if getattr(args, "runner_mode", None):
+                    raise CliError("--runner-mode is only supported by the removed legacy URL-run API.")
+                prompt = args.prompt or scenario_prompt
+                if not prompt:
+                    raise CliError("Either --prompt or --scenario must be provided.")
+                payload = client.create_demo_run(
+                    prompt=prompt,
+                    start_url=url,
+                    repo=getattr(args, "repo", None),
+                    branch=getattr(args, "branch", None),
+                    pr_url=getattr(args, "pr_url", None),
+                    scenario_id=scenario_id,
+                    twins=twins_arg or None,
+                    ttl_minutes=ttl_minutes if twins_arg else None,
+                )
     finally:
         client.close()
 
@@ -1381,56 +1556,12 @@ def run_test_url(args: argparse.Namespace) -> int:
 
 
 def run_validate_pr(args: argparse.Namespace) -> int:
-    _warn_legacy_validation_runs(args, "arga tests run <test-id> --pr-url ... --sandbox-id ...")
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
-    try:
-        if any(
-            getattr(args, name, None)
-            for name in ("branch", "pr_url", "frontend_url", "scenario_prompt", "scenario_id", "twins", "session_id")
-        ) or getattr(args, "run_type", "pr_run") != "pr_run":
-            payload = client.start_pr_run(
-                repo=args.repo,
-                branch=getattr(args, "branch", None),
-                pr_url=getattr(args, "pr_url", None)
-                or (f"https://github.com/{args.repo}/pull/{args.pr}" if getattr(args, "pr", None) else None),
-                frontend_url=getattr(args, "frontend_url", None),
-                context_notes=getattr(args, "context_notes", None),
-                scenario_prompt=getattr(args, "scenario_prompt", None),
-                scenario_id=getattr(args, "scenario_id", None),
-                twins=_split_csv(getattr(args, "twins", None)),
-                session_id=getattr(args, "session_id", None),
-                run_type=getattr(args, "run_type", "pr_run"),
-            )
-        else:
-            kwargs: dict[str, Any] = {"repo": args.repo, "pr_number": args.pr}
-            if getattr(args, "context_notes", None):
-                kwargs["context_notes"] = args.context_notes
-            payload = client.start_pr_validation(**kwargs)
-    finally:
-        client.close()
-
-    if args.json:
-        output = {"run_id": payload.get("run_id"), "status": payload.get("status")}
-        if payload.get("session_id"):
-            output["session_id"] = payload.get("session_id")
-        print(json.dumps(output))
-        return 0
-
-    print("Starting legacy PR validation...\n")
-    print(f"Repository: {args.repo}")
-    if getattr(args, "pr", None):
-        print(f"PR: #{args.pr}\n")
-    elif getattr(args, "pr_url", None):
-        print(f"PR URL: {args.pr_url}\n")
-    elif getattr(args, "branch", None):
-        print(f"Branch: {args.branch}\n")
-    print("Legacy validation run started. Future PR checks should run saved tests instead.")
-    print(f"Run ID: {payload.get('run_id', 'unknown')}")
-    print(f"Status: {payload.get('status', 'unknown')}")
-    if payload.get("session_id"):
-        print(f"Session ID: {payload['session_id']}")
-    return 0
+    _warn_legacy_validation_runs(args, "arga test-runner tests run <test-id> --pr-url ... --sandbox-id ...")
+    raise CliError(
+        "Manual PR validation runs were removed from validation-server. "
+        "Create a sandbox with `arga previews sandboxes run`, then run a saved test with "
+        "`arga test-runner tests run <test-id> --sandbox-id <sandbox-id> --pr-url <url>`."
+    )
 
 
 def run_previews_sandbox_run(args: argparse.Namespace) -> int:
@@ -1450,6 +1581,7 @@ def run_previews_sandbox_run(args: argparse.Namespace) -> int:
             twins=_split_csv(getattr(args, "twins", None)),
             ttl_minutes=ttl,
             env=_parse_env_assignments(getattr(args, "env", None)),
+            app_command=getattr(args, "app_command", None),
         )
     finally:
         client.close()
@@ -1517,6 +1649,71 @@ def run_previews_sandbox_teardown(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_agent_sandbox_probe(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.probe_agent_sandbox(repo=args.repo, branch=args.branch)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_agent_sandbox_probe(payload)
+    return 0
+
+
+def run_agent_sandbox_create(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        ttl = _resolve_ttl(client, args.ttl)
+        payload = client.create_agent_sandbox(
+            repo=args.repo,
+            branch=args.branch,
+            framework=args.framework,
+            deploy=_deploy_settings_from_args(args),
+            app_env=_parse_env_assignments(args.env),
+            twins=_split_csv(args.twins),
+            infra=_split_csv(args.infra),
+            scenario_prompt=args.scenario_prompt,
+            scenario_id=args.scenario_id,
+            agent=_read_json_file(args.agent_json) if args.agent_json else None,
+            ttl_minutes=ttl,
+            timeouts=_timeouts_from_args(args),
+        )
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print("Agent sandbox started.")
+    print(f"Repository: {args.repo}")
+    print(f"Branch: {args.branch}")
+    _print_agent_sandbox_summary(payload)
+    return 0
+
+
+def run_agent_sandbox_status(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_agent_sandbox(args.run_id)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_agent_sandbox_summary(payload, args.run_id)
+    return 0
+
+
 def run_twins_provision(args: argparse.Namespace) -> int:
     twins = _split_csv(args.twins)
     if not twins:
@@ -1558,8 +1755,7 @@ def run_twins_provision(args: argparse.Namespace) -> int:
 
 
 def run_twins_list(args: argparse.Namespace) -> int:
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
+    client = ApiClient(args.api_url)
     try:
         twins = client.list_twins()
     finally:
@@ -1752,6 +1948,173 @@ def _print_scenarios(scenarios: list[dict[str, Any]]) -> None:
         print()
 
 
+def _print_scenario_environment(env: dict[str, Any]) -> None:
+    print(f"Environment ID: {env.get('id') or '-'}")
+    print(f"Scenario ID: {env.get('scenario_id') or '-'}")
+    print(f"Run ID: {env.get('run_id') or '-'}")
+    print(f"Status: {env.get('status') or 'unknown'}")
+    print(f"Public: {_bool_label(bool(env.get('public', True)))}")
+    requested_twins = env.get("requested_twins")
+    if isinstance(requested_twins, list) and requested_twins:
+        print(f"Requested twins: {', '.join(str(twin) for twin in requested_twins)}")
+    if env.get("dashboard_url"):
+        print(f"Dashboard URL: {env['dashboard_url']}")
+    if env.get("last_seeded_at"):
+        print(f"Last seeded: {_format_timestamp(env.get('last_seeded_at'))}")
+    if env.get("error"):
+        print(f"Error: {env['error']}")
+    twins = env.get("twins")
+    if isinstance(twins, dict) and twins:
+        print("Twins:")
+        for name, info in sorted(twins.items()):
+            if not isinstance(info, dict):
+                continue
+            print(f"  {name}: {info.get('base_url') or '-'}")
+
+
+def _print_scenario_environments(envs: list[dict[str, Any]]) -> None:
+    if not envs:
+        print("No scenario twin environments found.")
+        return
+    headers = ["SCENARIO", "RUN", "STATUS", "PUBLIC", "TWINS"]
+    rows = [
+        [
+            str(env.get("scenario_id") or "-"),
+            str(env.get("run_id") or "-"),
+            str(env.get("status") or "unknown"),
+            _bool_label(bool(env.get("public", True))),
+            ", ".join(str(twin) for twin in (env.get("requested_twins") or [])) or "-",
+        ]
+        for env in envs
+    ]
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+
+
+def _print_scenario_long_runs(long_runs: list[dict[str, Any]]) -> None:
+    if not long_runs:
+        print("No active scenario long runs found.")
+        return
+    headers = ["SCENARIO", "RUN", "STATUS", "UPDATED"]
+    rows: list[list[str]] = []
+    for item in long_runs:
+        run = item.get("run") if isinstance(item.get("run"), dict) else {}
+        rows.append(
+            [
+                str(item.get("scenario_id") or "-"),
+                str(run.get("run_id") or "-"),
+                str(run.get("status") or "unknown"),
+                _format_timestamp(item.get("updated_at")),
+            ]
+        )
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+
+
+def run_scenario_environment_list(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        envs = client.list_scenario_twin_environments()
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(envs, indent=2))
+        return 0
+    _print_scenario_environments(envs)
+    return 0
+
+
+def run_scenario_environment_ensure(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.ensure_scenario_twin_environment(
+            args.scenario_id,
+            twins=_split_csv(getattr(args, "twins", None)),
+            public=not getattr(args, "private", False),
+        )
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_environment_status(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.get_scenario_twin_environment(args.scenario_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_environment_reseed(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.reseed_scenario_twin_environment(args.scenario_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_environment_delete(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.delete_scenario_twin_environment(args.scenario_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_long_runs(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        long_runs = client.list_scenario_long_runs()
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(long_runs, indent=2))
+        return 0
+    _print_scenario_long_runs(long_runs)
+    return 0
+
+
 def run_scenarios_presets(args: argparse.Namespace) -> int:
     _warn_deprecated_alias(args, "arga test-runner scenarios presets")
     client = ApiClient(args.api_url)
@@ -1895,14 +2258,14 @@ def _validate_help_text() -> str:
         "       arga validate install <repo>\n"
         "       arga validate config <repo>\n"
         "       arga validate config set <repo> [--trigger pr|branch] [--branch <name>] [--comments on|off]\n\n"
-        "Start validations or manage automatic validation settings."
+        "The pr command is a removed legacy tombstone. Use this namespace to manage automatic validation settings."
     )
 
 
 def _build_validate_pr_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="arga validate pr",
-        description="Run PR validation.",
+        description="Removed legacy PR validation command.",
         allow_abbrev=False,
     )
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -2433,6 +2796,68 @@ def run_runs_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_run_twin_diagnostics(payload: dict[str, Any]) -> None:
+    if "twins" in payload:
+        print(f"Run ID: {payload.get('run_id') or '-'}")
+        twins = payload.get("twins")
+        twin_list = twins if isinstance(twins, list) else []
+        if not twin_list:
+            print("No twin diagnostics available.")
+        for twin_payload in twin_list:
+            if isinstance(twin_payload, dict):
+                _print_run_twin_diagnostics(twin_payload)
+                print()
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors:
+            print("Errors:")
+            for error in errors:
+                print(f"- {error}")
+        return
+
+    print(f"Twin: {payload.get('label') or payload.get('twin_name') or '-'}")
+    print(f"Status: {payload.get('status') or '-'}")
+    print(f"Admin URL: {payload.get('admin_url') or '-'}")
+    print(f"State URL: {payload.get('state_url') or '-'}")
+    print(f"Requests URL: {payload.get('requests_url') or '-'}")
+    if payload.get("stub_hits_url"):
+        print(f"Stub Hits URL: {payload.get('stub_hits_url')}")
+    state = payload.get("state")
+    if state is not None:
+        print(f"State: {json.dumps(state, sort_keys=True)}")
+    request_log = payload.get("request_log")
+    if isinstance(request_log, dict):
+        requests = request_log.get("requests")
+        request_count = len(requests) if isinstance(requests, list) else 0
+        print(f"Requests: {request_count}")
+    stub_hits = payload.get("stub_hits")
+    if isinstance(stub_hits, dict):
+        hits = stub_hits.get("hits")
+        hit_count = len(hits) if isinstance(hits, list) else 0
+        print(f"Stub Hits: {hit_count}")
+    errors = payload.get("errors")
+    if isinstance(errors, list) and errors:
+        print("Errors:")
+        for error in errors:
+            print(f"- {error}")
+
+
+def run_runs_diagnostics(args: argparse.Namespace) -> int:
+    _warn_legacy_validation_runs(args, "arga runs diagnostics <run-id>")
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        payload = client.get_run_twin_diagnostics(args.run_id, twin_name=args.twin)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_run_twin_diagnostics(payload)
+    return 0
+
+
 def run_runs_cancel(args: argparse.Namespace) -> int:
     _warn_legacy_validation_runs(args, "arga test-runs get <run-id>")
     api_key = load_api_key()
@@ -2585,6 +3010,22 @@ def run_demo_runs_message(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_demo_runs_artifact(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        artifact = client.get_demo_run_artifact_url(args.run_id, args.filename)
+    finally:
+        client.close()
+    if args.json:
+        print(json.dumps(artifact, indent=2))
+    else:
+        print(f"Run ID: {artifact.get('run_id', args.run_id)}")
+        print(f"Filename: {artifact.get('filename', args.filename)}")
+        print(f"URL: {artifact.get('url', '-')}")
+    return 0
+
+
 def _print_tests_table(tests: list[dict[str, Any]]) -> None:
     headers = ["TEST_ID", "NAME", "REPO", "CI", "BLOCKS", "UPDATED"]
     rows = []
@@ -2674,6 +3115,8 @@ def run_tests_create(args: argparse.Namespace) -> int:
         payload["ci_enabled"] = True
     if getattr(args, "tag", None):
         payload["tags"] = args.tag
+    if getattr(args, "credential", None):
+        payload["credentials"] = _parse_key_value_assignments(args.credential, flag_name="--credential")
     if getattr(args, "test_config", None):
         config = _normalized_test_config(_extract_test_config(_read_json_file(args.test_config)))
         _assert_valid_test_config(config)
@@ -3191,11 +3634,7 @@ def run_wizard_teardown(_args: argparse.Namespace) -> int:
     session = load_session(os.getcwd())
     client = ApiClient(session["api_url"], api_key=session["api_key"])
     try:
-        response = client._client.post(
-            f"{client._api_url}/validate/{session['run_id']}/cancel",
-            headers=client._auth_headers(),
-        )
-        client._parse_json(response, "Failed to cancel run")
+        client.teardown_twins(session["run_id"])
         delete_session(os.getcwd())
         green("\nSession destroyed. .arga-session.json removed.")
     except Exception as exc:
@@ -3271,9 +3710,9 @@ def _add_url_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", default=None, help="Repository in owner/repo format")
     parser.add_argument("--branch", default=None, help="Branch associated with this URL run")
     parser.add_argument("--pr-url", default=None, help="Pull request URL associated with this URL run")
-    parser.add_argument("--email", help="Optional login email")
-    parser.add_argument("--password", help="Optional login password")
-    parser.add_argument("--ttl", type=int, default=None, help="Run duration in minutes")
+    parser.add_argument("--email", help=argparse.SUPPRESS)
+    parser.add_argument("--password", help=argparse.SUPPRESS)
+    parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes for twin, sandbox, or saved-test runs")
     parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
 
 
@@ -3333,6 +3772,54 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_delete_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
     scenarios_delete_parser.set_defaults(func=run_scenarios_delete, deprecated_alias=deprecated_alias)
 
+    scenarios_environment_parser = subparsers.add_parser(
+        "environment",
+        help="Manage a scenario's reusable twin environment",
+    )
+    environment_subparsers = scenarios_environment_parser.add_subparsers(
+        dest="environment_command",
+        required=True,
+    )
+
+    environment_list_parser = environment_subparsers.add_parser("list", help="List scenario twin environments")
+    environment_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_list_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_list_parser.set_defaults(func=run_scenario_environment_list)
+
+    environment_ensure_parser = environment_subparsers.add_parser(
+        "ensure",
+        help="Create or reuse a scenario twin environment",
+    )
+    environment_ensure_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_ensure_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_ensure_parser.add_argument("--twins", default=None, help="Comma-separated twins to provision")
+    environment_ensure_parser.add_argument("--private", action="store_true", default=False, help="Require proxy auth")
+    environment_ensure_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_ensure_parser.set_defaults(func=run_scenario_environment_ensure)
+
+    environment_status_parser = environment_subparsers.add_parser("status", help="Show scenario environment status")
+    environment_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_status_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_status_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_status_parser.set_defaults(func=run_scenario_environment_status)
+
+    environment_reseed_parser = environment_subparsers.add_parser("reseed", help="Reseed a ready scenario environment")
+    environment_reseed_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_reseed_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_reseed_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_reseed_parser.set_defaults(func=run_scenario_environment_reseed)
+
+    environment_delete_parser = environment_subparsers.add_parser("delete", help="Delete a scenario environment")
+    environment_delete_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_delete_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_delete_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_delete_parser.set_defaults(func=run_scenario_environment_delete)
+
+    scenarios_long_runs_parser = subparsers.add_parser("long-runs", help="List active scenario twin runs")
+    scenarios_long_runs_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_long_runs_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_long_runs_parser.set_defaults(func=run_scenario_long_runs)
+
 
 def _add_saved_test_parsers(subparsers: argparse._SubParsersAction) -> None:
     list_parser = subparsers.add_parser("list", help="List saved tests")
@@ -3358,6 +3845,12 @@ def _add_saved_test_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument("--repo", default=None, help="Repository in owner/repo format")
     create_parser.add_argument("--ci", action="store_true", default=False, help="Enable for CI checks")
     create_parser.add_argument("--tag", action="append", default=None)
+    create_parser.add_argument(
+        "--credential",
+        action="append",
+        default=None,
+        help="Saved-test credential in KEY=VALUE format. Repeat for multiple credentials.",
+    )
     create_parser.add_argument("--json", action="store_true", default=False)
     create_parser.set_defaults(func=run_tests_create)
 
@@ -3457,6 +3950,13 @@ def _add_demo_run_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     message_parser.add_argument("--json", action="store_true", default=False)
     message_parser.set_defaults(func=run_demo_runs_message)
 
+    artifact_parser = subparsers.add_parser("artifact", help="Print a signed URL for a test run artifact")
+    artifact_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    artifact_parser.add_argument("run_id")
+    artifact_parser.add_argument("filename", help="Artifact path, for example screenshots/final.png")
+    artifact_parser.add_argument("--json", action="store_true", default=False)
+    artifact_parser.set_defaults(func=run_demo_runs_artifact)
+
 
 def _add_sandbox_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser = subparsers.add_parser("create", help="Create a sandbox run for a branch or PR")
@@ -3468,6 +3968,7 @@ def _add_sandbox_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
     create_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
     create_parser.add_argument("--ttl", type=int, default=None, help="Sandbox TTL in minutes")
+    create_parser.add_argument("--app-command", default=None, help="Command used to start the sandbox app")
     create_parser.add_argument(
         "--env",
         action="append",
@@ -3494,6 +3995,50 @@ def _add_sandbox_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     teardown_parser.add_argument("sandbox_id", help="Sandbox run ID")
     teardown_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     teardown_parser.set_defaults(func=run_previews_sandbox_teardown)
+
+
+def _add_agent_sandbox_parsers(subparsers: argparse._SubParsersAction) -> None:
+    probe_parser = subparsers.add_parser("probe", help="Detect agent sandbox settings for a branch")
+    probe_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    probe_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
+    probe_parser.add_argument("--branch", required=True, help="Branch to inspect")
+    probe_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    probe_parser.set_defaults(func=run_agent_sandbox_probe)
+
+    create_parser = subparsers.add_parser("create", help="Create an agent sandbox for a branch")
+    create_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    create_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
+    create_parser.add_argument("--branch", required=True, help="Branch to deploy")
+    create_parser.add_argument("--framework", default="custom", help="Agent framework label")
+    create_parser.add_argument("--deploy-mode", choices=("auto", "dockerfile", "compose"), default="auto")
+    create_parser.add_argument("--context-dir", default=".", help="Build context directory")
+    create_parser.add_argument("--dockerfile", default="Dockerfile", help="Dockerfile path")
+    create_parser.add_argument("--compose-file", default="docker-compose.yml", help="Compose file path")
+    create_parser.add_argument("--port", type=int, default=8000, help="Public app port")
+    create_parser.add_argument("--app-command", default=None, help="Command used to start the agent app")
+    create_parser.add_argument("--language", default="unknown", help="Agent implementation language")
+    create_parser.add_argument("--entrypoint", default=None, help="Agent entrypoint file")
+    create_parser.add_argument("--run-command", default=None, help="Agent run command")
+    create_parser.add_argument("--install-command", default=None, help="Dependency install command")
+    create_parser.add_argument("--adapter", default=None, help="Agent adapter name")
+    create_parser.add_argument("--env", action="append", default=None, help="App env var in KEY=VALUE format")
+    create_parser.add_argument("--twins", default=None, help="Comma-separated service twins to include")
+    create_parser.add_argument("--infra", default=None, help="Comma-separated infrastructure surfaces to include")
+    create_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
+    create_parser.add_argument("--scenario-prompt", default=None, help="Scenario prompt to seed twins")
+    create_parser.add_argument("--agent-json", default=None, help="Path to extra agent metadata JSON")
+    create_parser.add_argument("--ttl", type=int, default=None, help="Sandbox TTL in minutes")
+    create_parser.add_argument("--job-timeout", type=int, default=None, help="Runner job timeout in seconds")
+    create_parser.add_argument("--compose-timeout", type=int, default=None, help="Compose readiness timeout in seconds")
+    create_parser.add_argument("--surface-timeout", type=int, default=None, help="Surface readiness timeout in seconds")
+    create_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    create_parser.set_defaults(func=run_agent_sandbox_create)
+
+    status_parser = subparsers.add_parser("status", help="Show agent sandbox status")
+    status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    status_parser.add_argument("run_id", help="Agent sandbox run ID")
+    status_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    status_parser.set_defaults(func=run_agent_sandbox_status)
 
 
 def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
@@ -3596,9 +4141,28 @@ def build_parser() -> argparse.ArgumentParser:
     whoami_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     whoami_parser.set_defaults(func=run_whoami)
 
+    devices_parser = subparsers.add_parser("devices", help="Manage authenticated CLI devices")
+    devices_subparsers = devices_parser.add_subparsers(dest="devices_command", required=True)
+    devices_list_parser = devices_subparsers.add_parser("list", help="List authenticated CLI devices")
+    devices_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    devices_list_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    devices_list_parser.set_defaults(func=run_devices_list)
+    devices_revoke_parser = devices_subparsers.add_parser("revoke", help="Revoke a CLI device")
+    devices_revoke_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    devices_revoke_parser.add_argument("device_id", help="CLI device ID")
+    devices_revoke_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    devices_revoke_parser.set_defaults(func=run_devices_revoke)
+
     sandbox_runs_parser = subparsers.add_parser("sandbox-runs", help="Create and inspect sandbox runs")
     sandbox_runs_subparsers = sandbox_runs_parser.add_subparsers(dest="sandbox_runs_command", required=True)
     _add_sandbox_run_parsers(sandbox_runs_subparsers)
+
+    agent_sandboxes_parser = subparsers.add_parser("agent-sandboxes", help="Create and inspect agent sandboxes")
+    agent_sandboxes_subparsers = agent_sandboxes_parser.add_subparsers(
+        dest="agent_sandboxes_command",
+        required=True,
+    )
+    _add_agent_sandbox_parsers(agent_sandboxes_subparsers)
 
     twin_runs_parser = subparsers.add_parser("twin-runs", help="Create and inspect twin runs")
     twin_runs_subparsers = twin_runs_parser.add_subparsers(dest="twin_runs_command", required=True)
@@ -3626,6 +4190,7 @@ def build_parser() -> argparse.ArgumentParser:
     sandbox_run_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
     sandbox_run_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
     sandbox_run_parser.add_argument("--ttl", type=int, default=None, help="Sandbox TTL in minutes")
+    sandbox_run_parser.add_argument("--app-command", default=None, help="Command used to start the sandbox app")
     sandbox_run_parser.add_argument(
         "--env",
         action="append",
@@ -3650,11 +4215,21 @@ def build_parser() -> argparse.ArgumentParser:
     sandbox_teardown_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     sandbox_teardown_parser.set_defaults(func=run_previews_sandbox_teardown)
 
+    agent_sandboxes_preview_parser = previews_subparsers.add_parser(
+        "agent-sandboxes",
+        help="Run agent sandbox preview environments",
+    )
+    agent_sandboxes_preview_subparsers = agent_sandboxes_preview_parser.add_subparsers(
+        dest="agent_sandboxes_command",
+        required=True,
+    )
+    _add_agent_sandbox_parsers(agent_sandboxes_preview_subparsers)
+
     pr_checks_parser = previews_subparsers.add_parser("pr-checks", help="Run and configure PR checks")
     pr_checks_subparsers = pr_checks_parser.add_subparsers(dest="pr_checks_command", required=True)
     pr_checks_run_parser = pr_checks_subparsers.add_parser(
         "run",
-        help="Legacy: start a PR validation run (future PR checks should run saved tests)",
+        help="Removed: manual PR validation runs now require saved tests",
     )
     pr_checks_run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     pr_checks_run_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
@@ -3827,7 +4402,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate_parser = subparsers.add_parser("validate", help="Deprecated alias for previews pr-checks")
     validate_subparsers = validate_parser.add_subparsers(dest="validate_command", required=True)
-    validate_pr_parser = validate_subparsers.add_parser("pr", help="Deprecated alias for previews pr-checks run")
+    validate_pr_parser = validate_subparsers.add_parser("pr", help="Removed PR validation run alias")
     validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
@@ -3883,6 +4458,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show only failed worker logs and warning/error runtime logs",
     )
     runs_logs_parser.set_defaults(func=run_runs_logs)
+
+    runs_diagnostics_parser = runs_subparsers.add_parser("diagnostics", help="Legacy: show twin diagnostics")
+    runs_diagnostics_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    runs_diagnostics_parser.add_argument("run_id", help="Validation run ID")
+    runs_diagnostics_parser.add_argument("--twin", default=None, help="Only inspect one twin, e.g. slack")
+    runs_diagnostics_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    runs_diagnostics_parser.set_defaults(func=run_runs_diagnostics)
 
     runs_cancel_parser = runs_subparsers.add_parser("cancel", help="Legacy: cancel a validation run")
     runs_cancel_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")

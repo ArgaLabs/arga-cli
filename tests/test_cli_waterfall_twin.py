@@ -9,7 +9,7 @@ def test_waterfall_twin_is_in_cli_catalog() -> None:
         "label": "Waterfall",
         "port": 12129,
         "intercept_domains": ["api.waterfall.io"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     }
     assert "API key: ad18e456-0dd7-45e1-b094-43a0361aedfa" in QUICKSTART_SUMMARIES["waterfall"]
 

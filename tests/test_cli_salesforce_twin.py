@@ -9,7 +9,7 @@ def test_salesforce_twin_is_in_cli_catalog() -> None:
         "label": "Salesforce",
         "port": 12125,
         "intercept_domains": ["login.salesforce.com", "test.salesforce.com", "my.salesforce.com"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     }
     assert "Access token: 00D000000000001!salesforce-twin-token" in QUICKSTART_SUMMARIES["salesforce"]
 

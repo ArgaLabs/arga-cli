@@ -38,3 +38,4 @@ def test_linear_token_shape_detection_rewrites_real_tokens() -> None:
     assert personal_key["default_value"] == "lin_api_twin_owner_personal_key_0001"
     assert oauth_token is not None
     assert oauth_token["twin"] == "linear"
+    assert oauth_token["default_value"] == "lin_api_twin_owner_personal_key_0001"

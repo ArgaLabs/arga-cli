@@ -37,6 +37,12 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["www.googleapis.com/drive/v3", "content.googleapis.com"],
         "show_in_ui": True,
     },
+    "gmail": {
+        "label": "Gmail",
+        "port": 12123,
+        "intercept_domains": ["gmail.googleapis.com", "gmailmcp.googleapis.com", "people.googleapis.com"],
+        "show_in_ui": True,
+    },
     "dropbox": {
         "label": "Dropbox",
         "port": 12119,
@@ -63,7 +69,7 @@ TWIN_CATALOG: dict[str, dict] = {
     },
     "linkedin": {
         "label": "LinkedIn",
-        "port": 12123,
+        "port": 12124,
         "intercept_domains": ["api.linkedin.com", "www.linkedin.com", "linkedin.com", "media.licdn.com"],
         "show_in_ui": True,
     },
@@ -71,7 +77,7 @@ TWIN_CATALOG: dict[str, dict] = {
         "label": "Unstructured",
         "port": 12118,
         "intercept_domains": ["api.unstructuredapp.io", "platform.unstructuredapp.io"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "stripe": {
         "label": "Stripe",
@@ -83,13 +89,13 @@ TWIN_CATALOG: dict[str, dict] = {
         "label": "Box",
         "port": 12116,
         "intercept_domains": ["api.box.com", "upload.box.com", "app.box.com"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "salesforce": {
         "label": "Salesforce",
         "port": 12125,
         "intercept_domains": ["login.salesforce.com", "test.salesforce.com", "my.salesforce.com"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "google_calendar": {
         "label": "Google Calendar",
@@ -101,7 +107,7 @@ TWIN_CATALOG: dict[str, dict] = {
         "label": "Unified",
         "port": 12113,
         "intercept_domains": ["api.unified.to", "unified.to"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "jira": {
         "label": "Jira",
@@ -115,11 +121,17 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.linear.app", "linear.app"],
         "show_in_ui": True,
     },
+    "hubspot": {
+        "label": "HubSpot",
+        "port": 12128,
+        "intercept_domains": ["api.hubapi.com", "api.hsforms.com", "app.hubspot.com"],
+        "show_in_ui": True,
+    },
     "waterfall": {
         "label": "Waterfall",
         "port": 12129,
         "intercept_domains": ["api.waterfall.io"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
 }
 
@@ -163,6 +175,16 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
             "GOOGLE_CLIENT_ID": "google-twin-client-id",
             "GOOGLE_CLIENT_SECRET": "google-twin-client-secret",
             "GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner",
+        },
+    },
+    "gmail": {
+        "token_vars": ["GMAIL_ACCESS_TOKEN", "GMAIL_TOKEN", "GOOGLE_ACCESS_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+        "url_vars": ["GMAIL_API_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "GMAIL_ACCESS_TOKEN": "ya29.gmail-twin-owner",
+            "GOOGLE_CLIENT_ID": "google-twin-client-id",
+            "GOOGLE_CLIENT_SECRET": "google-twin-client-secret",
         },
     },
     "dropbox": {
@@ -276,12 +298,19 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         },
     },
     "google_calendar": {
-        "token_vars": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_CALENDAR_TOKEN", "GOOGLE_ACCESS_TOKEN"],
+        "token_vars": [
+            "GOOGLE_CLIENT_ID",
+            "GOOGLE_CLIENT_SECRET",
+            "GOOGLE_CALENDAR_TOKEN",
+            "GOOGLE_CALENDAR_ACCESS_TOKEN",
+            "GOOGLE_ACCESS_TOKEN",
+        ],
         "url_vars": ["GOOGLE_CALENDAR_API_URL"],
         "secret_vars": [],
         "defaults": {
             "GOOGLE_CLIENT_ID": "google-twin-client-id",
             "GOOGLE_CLIENT_SECRET": "google-twin-client-secret",
+            "GOOGLE_CALENDAR_ACCESS_TOKEN": "test-token",
         },
     },
     "unified": {
@@ -307,6 +336,21 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "url_vars": ["LINEAR_API_URL", "LINEAR_BASE_URL", "LINEAR_GRAPHQL_URL"],
         "secret_vars": ["LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
         "defaults": {"LINEAR_API_KEY": "lin_api_twin_owner_personal_key_0001"},
+    },
+    "hubspot": {
+        "token_vars": [
+            "HUBSPOT_ACCESS_TOKEN",
+            "HUBSPOT_PRIVATE_APP_TOKEN",
+            "HUBSPOT_DEVELOPER_API_KEY",
+            "HUBSPOT_API_KEY",
+        ],
+        "url_vars": ["HUBSPOT_API_URL", "HUBSPOT_BASE_URL", "HUBSPOT_FORMS_API_URL"],
+        "secret_vars": ["HUBSPOT_CLIENT_ID", "HUBSPOT_CLIENT_SECRET", "HUBSPOT_APP_SECRET"],
+        "defaults": {
+            "HUBSPOT_ACCESS_TOKEN": "hubspot-twin-access-token",
+            "HUBSPOT_PRIVATE_APP_TOKEN": "hubspot-twin-private-app-token",
+            "HUBSPOT_DEVELOPER_API_KEY": "hubspot-twin-developer-key",
+        },
     },
     "waterfall": {
         "token_vars": ["WATERFALL_API_KEY"],
@@ -389,6 +433,14 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "google-twin-client-id",
         "confidence": "high",
     },
+    {
+        "twin": "gmail",
+        "label": "Gmail access token (ya29...)",
+        "pattern": r"^ya29\.",
+        "category": "token",
+        "default_value": "ya29.gmail-twin-owner",
+        "confidence": "medium",
+    },
     # Dropbox
     {
         "twin": "dropbox",
@@ -396,6 +448,15 @@ TOKEN_SHAPES: list[dict] = [
         "pattern": r"^sl\.",
         "category": "token",
         "default_value": "dropbox-twin-app-key",
+        "confidence": "high",
+    },
+    # GitLab
+    {
+        "twin": "gitlab",
+        "label": "GitLab token (glpat-/glrt-/gldt-/glsoat-/gloas-...)",
+        "pattern": r"^gl(?:pat|rt|dt|soat|oas)-",
+        "category": "token",
+        "default_value": "glpat-gitlab-twin-token",
         "confidence": "high",
     },
     # LinkedIn
@@ -406,15 +467,6 @@ TOKEN_SHAPES: list[dict] = [
         "category": "token",
         "default_value": "",
         "confidence": "medium",
-    },
-    # GitLab
-    {
-        "twin": "gitlab",
-        "label": "GitLab token (glpat-/glrt-/gldt-/glsoat-/gloas-...)",
-        "pattern": r"^gl(?:pat|rt|dt|soat|oas)-",
-        "category": "token",
-        "default_value": "glpat-gitlab-twin-token",
-        "confidence": "high",
     },
     # Salesforce
     {
@@ -448,6 +500,15 @@ TOKEN_SHAPES: list[dict] = [
         "pattern": r"^lin_oauth_",
         "category": "token",
         "default_value": "lin_api_twin_owner_personal_key_0001",
+        "confidence": "high",
+    },
+    # HubSpot
+    {
+        "twin": "hubspot",
+        "label": "HubSpot private app token (pat-...)",
+        "pattern": r"^pat-[A-Za-z0-9_-]+",
+        "category": "token",
+        "default_value": "hubspot-twin-private-app-token",
         "confidence": "high",
     },
     # Waterfall
@@ -485,6 +546,11 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         'Seed files: "Quarterly Plan.txt", "Reports" (folder)',
         "Owner token: ya29.drive-twin-owner",
         "Editor token: ya29.drive-twin-editor",
+    ],
+    "gmail": [
+        "Gmail v1 API emulator ready",
+        "Supports messages, threads, drafts, labels, settings, and watch history",
+        "Owner token: ya29.gmail-twin-owner",
     ],
     "dropbox": [
         "Root folder initialized",
@@ -553,6 +619,12 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         "Resources: issues, projects, initiatives, documents, milestones, comments",
         "GraphQL endpoint: /graphql",
         "Token: lin_api_twin_owner_personal_key_0001",
+    ],
+    "hubspot": [
+        "HubSpot CRM API emulator ready",
+        "Supports CRM objects, OAuth, webhooks, files, forms, conversations, and settings",
+        "Private app token: hubspot-twin-private-app-token",
+        "Developer API key: hubspot-twin-developer-key",
     ],
     "waterfall": [
         "Starts empty by default",
