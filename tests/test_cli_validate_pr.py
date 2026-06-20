@@ -1,49 +1,28 @@
-from __future__ import annotations
-
-import json
-
 from arga_cli import main
 
 
-def test_validate_pr_command_prints_run_id(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
-
-    def fake_start(self, *, repo: str, pr_number: int):
-        assert repo == "arga-labs/validation-server"
-        assert pr_number == 182
-        return {"run_id": "run_83921", "status": "queued"}
-
-    monkeypatch.setattr(main.ApiClient, "start_pr_validation", fake_start)
-    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
-
+def test_validate_pr_command_rejects_removed_api() -> None:
     args = main.build_parser().parse_args(["validate", "pr", "--repo", "arga-labs/validation-server", "--pr", "182"])
-    exit_code = args.func(args)
-    output = capsys.readouterr().out
 
-    assert exit_code == 0
-    assert "Starting legacy PR validation..." in output
-    assert "Repository: arga-labs/validation-server" in output
-    assert "PR: #182" in output
-    assert "Legacy validation run started." in output
-    assert "Run ID: run_83921" in output
-    assert "Status: queued" in output
+    try:
+        args.func(args)
+    except main.CliError as exc:
+        message = str(exc)
+        assert "Manual PR validation runs were removed" in message
+        assert "arga previews sandboxes run" in message
+        assert "arga test-runner tests run" in message
+    else:
+        raise AssertionError("expected CliError")
 
 
-def test_validate_pr_json_flag(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
-
-    def fake_start(self, *, repo: str, pr_number: int):
-        return {"run_id": "run_83921", "status": "queued"}
-
-    monkeypatch.setattr(main.ApiClient, "start_pr_validation", fake_start)
-    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
-
+def test_previews_pr_checks_run_rejects_removed_api() -> None:
     args = main.build_parser().parse_args(
-        ["validate", "pr", "--repo", "arga-labs/validation-server", "--pr", "182", "--json"]
+        ["previews", "pr-checks", "run", "--repo", "arga-labs/validation-server", "--pr", "182", "--json"]
     )
-    exit_code = args.func(args)
-    output = capsys.readouterr().out
 
-    assert exit_code == 0
-    parsed = json.loads(output)
-    assert parsed == {"run_id": "run_83921", "status": "queued"}
+    try:
+        args.func(args)
+    except main.CliError as exc:
+        assert "Manual PR validation runs were removed" in str(exc)
+    else:
+        raise AssertionError("expected CliError")

@@ -100,7 +100,11 @@ def test_twins_list_json_keeps_machine_readable_catalog_shape(monkeypatch, capsy
         {"name": "slack", "label": "Slack", "kind": "frontend", "show_in_ui": True},
         {"name": "postgres", "label": "Postgres", "kind": "infra", "show_in_ui": False},
     ]
-    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(
+        main,
+        "load_api_key",
+        lambda: (_ for _ in ()).throw(AssertionError("auth not required")),
+    )
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     monkeypatch.setattr(main.ApiClient, "list_twins", lambda self: catalog)
 
@@ -212,6 +216,7 @@ def test_sandbox_run_with_pr_url_twins_scenario_and_json_output(monkeypatch, cap
         "twins": ["slack", "github"],
         "ttl_minutes": 75,
         "env": {},
+        "app_command": None,
     }
     assert json.loads(output)["sandbox_id"] == "sandbox_pr"
 

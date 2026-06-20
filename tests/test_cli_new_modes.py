@@ -5,53 +5,9 @@ import json
 from arga_cli import main
 
 
-def test_start_pr_run_posts_to_new_endpoint(monkeypatch) -> None:
-    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
-    captured: dict[str, object] = {}
-
-    class FakeStream:
-        status_code = 200
-        is_success = True
-        headers = {"X-Run-Id": "run_123", "X-Session-Id": "session_123"}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-        def iter_text(self):
-            yield "data: {}\n\n"
-
-    def fake_stream(method: str, url: str, *, json: dict[str, object], headers: dict[str, str], timeout: float):
-        captured["method"] = method
-        captured["url"] = url
-        captured["json"] = json
-        captured["headers"] = headers
-        captured["timeout"] = timeout
-        return FakeStream()
-
-    monkeypatch.setattr(client._client, "stream", fake_stream)
-    try:
-        payload = client.start_pr_run(
-            repo="arga-labs/validation-server",
-            pr_url="https://github.com/arga-labs/validation-server/pull/298",
-            context_notes="focus blocks",
-            twins=["slack"],
-        )
-    finally:
-        client.close()
-
-    assert captured["method"] == "POST"
-    assert captured["url"] == "https://api.argalabs.com/validate/pr-run"
-    assert captured["json"] == {
-        "repo": "arga-labs/validation-server",
-        "run_type": "pr_run",
-        "pr_url": "https://github.com/arga-labs/validation-server/pull/298",
-        "context_notes": "focus blocks",
-        "twins": ["slack"],
-    }
-    assert payload == {"run_id": "run_123", "session_id": "session_123", "status": "generating_story"}
+def test_pr_run_client_helper_removed() -> None:
+    assert not hasattr(main.ApiClient, "start_pr_run")
+    assert not hasattr(main.ApiClient, "start_pr_validation")
 
 
 def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch) -> None:
@@ -67,11 +23,18 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
         def json(self):
             return self._payload
 
-    def fake_get(url: str, *, headers: dict[str, str], params: dict[str, object] | None = None):
+    def fake_get(
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: dict[str, object] | None = None,
+    ):
         captured.append(("GET", url, params))
         payload: object = [{"name": "linear", "label": "Linear", "kind": "backend", "show_in_ui": True}]
         if url.endswith("/twin-runs/run_123"):
             payload = {"run_id": "run_123", "status": "ready"}
+        elif url.endswith("/validate/agent-sandboxes/agent_run_123"):
+            payload = {"run_id": "agent_run_123", "status": "ready", "twins": ["slack"]}
         elif "/sandbox-runs/" in url and url.endswith("/logs"):
             payload = {"sandbox_id": "sandbox_123", "logs": []}
         elif "/sandbox-runs/" in url:
@@ -82,10 +45,20 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
         captured.append(("DELETE", url, None))
         return FakeResponse({"sandbox_id": "sandbox_123", "status": "deleted"})
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, object] | None = None):
+    def fake_post(
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, object] | None = None,
+        timeout: float | None = None,
+    ):
         captured.append(("POST", url, json))
         if url.endswith("/sandbox-runs"):
             return FakeResponse({"sandbox_id": "sandbox_123", "status": "queued", "twins": {}})
+        if url.endswith("/validate/agent-sandboxes/probe"):
+            return FakeResponse({"repo": "arga-labs/app", "branch": "feature/demo", "settings": {"framework": "custom"}})
+        if url.endswith("/validate/agent-sandboxes"):
+            return FakeResponse({"run_id": "agent_run_123", "status": "provisioning", "twins": ["slack"]})
         return FakeResponse({"status": "ok", "run_id": "run_123", "ttl_minutes": 75, "is_public": False})
 
     monkeypatch.setattr(client._client, "get", fake_get)
@@ -99,10 +72,25 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
             scenario_id="scenario_123",
             ttl_minutes=90,
             env={"FEATURE_FLAG": "on"},
+            app_command="npm run dev",
         )
         client.get_sandbox("sandbox_123")
         client.get_sandbox_logs("sandbox_123")
         client.delete_sandbox("sandbox_123")
+        client.probe_agent_sandbox(repo="arga-labs/app", branch="feature/demo")
+        client.create_agent_sandbox(
+            repo="arga-labs/app",
+            branch="feature/demo",
+            framework="langgraph",
+            deploy={"mode": "dockerfile", "app_port": 8080},
+            app_env={"OPENAI_API_KEY": "test"},
+            twins=["slack"],
+            infra=["postgres"],
+            scenario_prompt="seed",
+            ttl_minutes=90,
+            timeouts={"job_timeout_seconds": 900},
+        )
+        client.get_agent_sandbox("agent_run_123")
         client.list_twins()
         client.provision_twins_start(
             twins=["linear"],
@@ -129,11 +117,34 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
                 "scenario_id": "scenario_123",
                 "ttl_minutes": 90,
                 "env": {"FEATURE_FLAG": "on"},
+                "app_command": "npm run dev",
             },
         ),
         ("GET", "https://api.argalabs.com/sandbox-runs/sandbox_123", None),
         ("GET", "https://api.argalabs.com/sandbox-runs/sandbox_123/logs", None),
         ("DELETE", "https://api.argalabs.com/sandbox-runs/sandbox_123", None),
+        (
+            "POST",
+            "https://api.argalabs.com/validate/agent-sandboxes/probe",
+            {"repo": "arga-labs/app", "branch": "feature/demo"},
+        ),
+        (
+            "POST",
+            "https://api.argalabs.com/validate/agent-sandboxes",
+            {
+                "repo": "arga-labs/app",
+                "branch": "feature/demo",
+                "framework": "langgraph",
+                "deploy": {"mode": "dockerfile", "app_port": 8080},
+                "app_env": {"OPENAI_API_KEY": "test"},
+                "twins": ["slack"],
+                "infra": ["postgres"],
+                "scenario_prompt": "seed",
+                "ttl_minutes": 90,
+                "timeouts": {"job_timeout_seconds": 900},
+            },
+        ),
+        ("GET", "https://api.argalabs.com/validate/agent-sandboxes/agent_run_123", None),
         ("GET", "https://api.argalabs.com/twins", None),
         (
             "POST",
@@ -156,6 +167,175 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
         ("POST", "https://api.argalabs.com/twin-runs/run_123/teardown", None),
         ("POST", "https://api.argalabs.com/twin-runs/run_123/lock", None),
     ]
+
+
+def test_list_twins_uses_public_catalog_endpoint(monkeypatch) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return [{"name": "slack", "label": "Slack", "kind": "frontend", "show_in_ui": True}]
+
+    def fake_get(url: str, **kwargs: object):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeResponse()
+
+    monkeypatch.setattr(client._client, "get", fake_get)
+    try:
+        twins = client.list_twins()
+    finally:
+        client.close()
+
+    assert twins[0]["name"] == "slack"
+    assert captured == {"url": "https://api.argalabs.com/twins", "kwargs": {}}
+
+
+def test_test_run_artifact_uses_supported_route(monkeypatch) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: dict[str, object] = {}
+
+    class FakeRedirect:
+        status_code = 307
+        is_success = False
+        is_redirect = True
+        headers = {"location": "https://storage.example.com/signed/final.png"}
+
+        def json(self):
+            raise ValueError("redirect has no json")
+
+    def fake_get(
+        url: str,
+        *,
+        headers: dict[str, str],
+        follow_redirects: bool,
+    ):
+        captured.update({"url": url, "headers": headers, "follow_redirects": follow_redirects})
+        return FakeRedirect()
+
+    monkeypatch.setattr(client._client, "get", fake_get)
+    try:
+        artifact = client.get_demo_run_artifact_url("run_123", "screenshots/final.png")
+    finally:
+        client.close()
+
+    assert captured == {
+        "url": "https://api.argalabs.com/test-runs/run_123/artifacts/screenshots/final.png",
+        "headers": {"Authorization": "Bearer arga_api_key"},
+        "follow_redirects": False,
+    }
+    assert artifact == {
+        "run_id": "run_123",
+        "filename": "screenshots/final.png",
+        "url": "https://storage.example.com/signed/final.png",
+    }
+
+
+def test_test_runner_runs_artifact_prints_signed_url(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, str] = {}
+
+    def fake_artifact(self, run_id: str, filename: str):
+        captured.update({"run_id": run_id, "filename": filename})
+        return {
+            "run_id": run_id,
+            "filename": filename,
+            "url": "https://storage.example.com/signed/final.png",
+        }
+
+    monkeypatch.setattr(main.ApiClient, "get_demo_run_artifact_url", fake_artifact)
+
+    args = main.build_parser().parse_args(
+        ["test-runner", "runs", "artifact", "run_123", "screenshots/final.png"]
+    )
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == {"run_id": "run_123", "filename": "screenshots/final.png"}
+    assert "Run ID: run_123" in output
+    assert "Filename: screenshots/final.png" in output
+    assert "URL: https://storage.example.com/signed/final.png" in output
+
+
+def test_runs_diagnostics_use_supported_diagnostics_endpoints(monkeypatch, capsys) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: list[str] = []
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def __init__(self, payload: object):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url: str, *, headers: dict[str, str]):
+        captured.append(url)
+        if url.endswith("/twins/slack/diagnostics"):
+            return FakeResponse(
+                {
+                    "run_id": "run_123",
+                    "twin_name": "slack",
+                    "label": "Slack",
+                    "status": "ready",
+                    "admin_url": "https://pub-run--slack.example.com/_admin",
+                    "state_url": "https://pub-run--slack.example.com/_admin/state",
+                    "requests_url": "https://pub-run--slack.example.com/_admin/requests",
+                    "request_log": {"requests": [{"path": "/api/chat.postMessage"}]},
+                    "errors": [],
+                }
+            )
+        return FakeResponse(
+            {
+                "run_id": "run_123",
+                "twins": [
+                    {
+                        "run_id": "run_123",
+                        "twin_name": "slack",
+                        "label": "Slack",
+                        "status": "ready",
+                        "admin_url": "https://pub-run--slack.example.com/_admin",
+                        "state_url": "https://pub-run--slack.example.com/_admin/state",
+                        "requests_url": "https://pub-run--slack.example.com/_admin/requests",
+                        "errors": [],
+                    }
+                ],
+                "errors": [],
+            }
+        )
+
+    monkeypatch.setattr(client._client, "get", fake_get)
+    try:
+        all_payload = client.get_run_twin_diagnostics("run_123")
+        slack_payload = client.get_run_twin_diagnostics("run_123", twin_name="slack")
+    finally:
+        client.close()
+
+    assert captured == [
+        "https://api.argalabs.com/runs/run_123/twins/diagnostics",
+        "https://api.argalabs.com/runs/run_123/twins/slack/diagnostics",
+    ]
+    assert all_payload["twins"][0]["twin_name"] == "slack"
+    assert slack_payload["request_log"]["requests"][0]["path"] == "/api/chat.postMessage"
+
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main.ApiClient, "get_run_twin_diagnostics", lambda self, run_id, twin_name=None: slack_payload)
+
+    args = main.build_parser().parse_args(["runs", "diagnostics", "run_123", "--twin", "slack"])
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+
+    assert "Twin: Slack" in output
+    assert "Requests: 1" in output
 
 
 def test_scenario_presets_use_public_presets_endpoint(monkeypatch, capsys) -> None:
@@ -208,6 +388,130 @@ def test_scenario_presets_use_public_presets_endpoint(monkeypatch, capsys) -> No
     assert "twins: stripe" in output
 
 
+def test_scenario_environment_api_methods_use_supported_routes(monkeypatch) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: list[tuple[str, str, dict[str, object] | None]] = []
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def __init__(self, payload: object):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    env_payload = {
+        "id": "env_123",
+        "scenario_id": "scenario_123",
+        "run_id": "run_123",
+        "status": "ready",
+        "requested_twins": ["slack"],
+        "public": False,
+        "twins": {},
+    }
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, object] | None = None, timeout=None):
+        captured.append(("POST", url, json))
+        return FakeResponse(env_payload)
+
+    def fake_get(url: str, *, headers: dict[str, str]):
+        captured.append(("GET", url, None))
+        if url.endswith("/scenario-twin-environments"):
+            return FakeResponse([env_payload])
+        if url.endswith("/scenarios/long-runs"):
+            return FakeResponse([{"scenario_id": "scenario_123", "run": {"run_id": "run_123", "status": "ready"}}])
+        return FakeResponse(env_payload)
+
+    def fake_delete(url: str, *, headers: dict[str, str]):
+        captured.append(("DELETE", url, None))
+        return FakeResponse({**env_payload, "status": "deleted"})
+
+    monkeypatch.setattr(client._client, "post", fake_post)
+    monkeypatch.setattr(client._client, "get", fake_get)
+    monkeypatch.setattr(client._client, "delete", fake_delete)
+    try:
+        client.ensure_scenario_twin_environment("scenario_123", twins=["slack"], public=False)
+        client.get_scenario_twin_environment("scenario_123")
+        client.reseed_scenario_twin_environment("scenario_123")
+        client.delete_scenario_twin_environment("scenario_123")
+        client.list_scenario_twin_environments()
+        client.list_scenario_long_runs()
+    finally:
+        client.close()
+
+    assert captured == [
+        (
+            "POST",
+            "https://api.argalabs.com/scenarios/scenario_123/twin-environment",
+            {"public": False, "twins": ["slack"]},
+        ),
+        ("GET", "https://api.argalabs.com/scenarios/scenario_123/twin-environment", None),
+        ("POST", "https://api.argalabs.com/scenarios/scenario_123/twin-environment/reseed", None),
+        ("DELETE", "https://api.argalabs.com/scenarios/scenario_123/twin-environment", None),
+        ("GET", "https://api.argalabs.com/scenario-twin-environments", None),
+        ("GET", "https://api.argalabs.com/scenarios/long-runs", None),
+    ]
+
+
+def test_scenario_environment_commands_parse_and_print(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    captured: dict[str, object] = {}
+    env_payload = {
+        "id": "env_123",
+        "scenario_id": "scenario_123",
+        "run_id": "run_123",
+        "status": "ready",
+        "requested_twins": ["slack", "jira"],
+        "public": False,
+        "dashboard_url": "https://app.argalabs.com/validate/run_123",
+        "twins": {"slack": {"base_url": "https://pub-run--slack.example.com"}},
+    }
+
+    def fake_ensure(self, scenario_id: str, *, twins: list[str] | None = None, public: bool = True):
+        captured.update({"scenario_id": scenario_id, "twins": twins, "public": public})
+        return env_payload
+
+    monkeypatch.setattr(main.ApiClient, "ensure_scenario_twin_environment", fake_ensure)
+    monkeypatch.setattr(main.ApiClient, "list_scenario_twin_environments", lambda self: [env_payload])
+    monkeypatch.setattr(
+        main.ApiClient,
+        "list_scenario_long_runs",
+        lambda self: [{"scenario_id": "scenario_123", "run": {"run_id": "run_123", "status": "ready"}}],
+    )
+
+    ensure_args = main.build_parser().parse_args(
+        [
+            "test-runner",
+            "scenarios",
+            "environment",
+            "ensure",
+            "scenario_123",
+            "--twins",
+            "slack,jira",
+            "--private",
+        ]
+    )
+    assert ensure_args.func(ensure_args) == 0
+    ensure_output = capsys.readouterr().out
+
+    list_args = main.build_parser().parse_args(["test-runner", "scenarios", "environment", "list"])
+    assert list_args.func(list_args) == 0
+    list_output = capsys.readouterr().out
+
+    long_runs_args = main.build_parser().parse_args(["test-runner", "scenarios", "long-runs", "--json"])
+    assert long_runs_args.func(long_runs_args) == 0
+    long_runs_output = capsys.readouterr().out
+
+    assert captured == {"scenario_id": "scenario_123", "twins": ["slack", "jira"], "public": False}
+    assert "Environment ID: env_123" in ensure_output
+    assert "Public: no" in ensure_output
+    assert "scenario_123" in list_output
+    assert json.loads(long_runs_output)[0]["run"]["run_id"] == "run_123"
+
+
 def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
     client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
     captured: list[tuple[str, dict[str, object] | None]] = []
@@ -245,6 +549,87 @@ def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
                 {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
             ),
     ]
+
+
+def test_saved_test_create_accepts_credentials(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    config_path = tmp_path / "test_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {
+                        "action": "expect",
+                        "selector": "main",
+                        "expect": {"type": "visible"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_create(self, payload: dict[str, object]) -> dict[str, object]:
+        captured.update(payload)
+        return {"id": "test_123", "name": payload["name"]}
+
+    monkeypatch.setattr(main.ApiClient, "create_demo_test", fake_create)
+
+    args = main.build_parser().parse_args(
+        [
+            "test-runner",
+            "tests",
+            "create",
+            "--name",
+            "Checkout login",
+            "--prompt",
+            "log in and create an order",
+            "--url",
+            "https://demo-app.com",
+            "--test-config",
+            str(config_path),
+            "--credential",
+            "email=test@company.com",
+            "--credential",
+            "password=supersecret",
+        ]
+    )
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+
+    assert captured["credentials"] == {"email": "test@company.com", "password": "supersecret"}
+    assert "Saved test created." in output
+
+
+def test_saved_test_create_rejects_invalid_credential(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "test_config.json"
+    config_path.write_text(json.dumps({"steps": [{"action": "click", "selector": "button"}]}), encoding="utf-8")
+    args = main.build_parser().parse_args(
+        [
+            "test-runner",
+            "tests",
+            "create",
+            "--name",
+            "Checkout login",
+            "--prompt",
+            "log in",
+            "--url",
+            "https://demo-app.com",
+            "--test-config",
+            str(config_path),
+            "--credential",
+            "not-a-pair",
+        ]
+    )
+
+    try:
+        args.func(args)
+    except main.CliError as exc:
+        assert "Invalid --credential value" in str(exc)
+    else:
+        raise AssertionError("expected CliError")
 
 
 def test_test_runner_runs_url_accepts_sandbox_id(monkeypatch, capsys) -> None:
@@ -508,6 +893,8 @@ def test_previews_sandbox_run_uses_sandbox_api(monkeypatch, capsys) -> None:
             "45",
             "--env",
             "FEATURE_FLAG=on",
+            "--app-command",
+            "npm run preview",
         ]
     )
     exit_code = args.func(args)
@@ -519,6 +906,7 @@ def test_previews_sandbox_run_uses_sandbox_api(monkeypatch, capsys) -> None:
     assert captured["twins"] == ["slack"]
     assert captured["ttl_minutes"] == 45
     assert captured["env"] == {"FEATURE_FLAG": "on"}
+    assert captured["app_command"] == "npm run preview"
     assert "Sandbox preview started." in output
     assert "Sandbox ID: sandbox_123" in output
 
@@ -564,6 +952,107 @@ def test_previews_sandbox_status_logs_and_teardown(monkeypatch, capsys) -> None:
     assert "deploy: Started" in logs_output
     assert teardown_exit == 0
     assert "Status: deleted" in teardown_output
+
+
+def test_agent_sandbox_commands_use_validation_api(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured: dict[str, object] = {}
+
+    def fake_probe(self, *, repo: str, branch: str):
+        captured["probe"] = {"repo": repo, "branch": branch}
+        return {
+            "repo": repo,
+            "branch": branch,
+            "settings": {
+                "framework": "langgraph",
+                "deploy": {"mode": "dockerfile", "app_port": 8080},
+                "twins": ["slack"],
+                "env_keys": ["OPENAI_API_KEY"],
+            },
+        }
+
+    def fake_create(self, **kwargs: object):
+        captured["create"] = kwargs
+        return {
+            "run_id": "agent_run_123",
+            "session_id": "session_123",
+            "status": "provisioning",
+            "dashboard_url": "https://app.argalabs.com/runs/agent_run_123",
+            "twins": ["slack"],
+        }
+
+    def fake_status(self, run_id: str):
+        captured["status"] = run_id
+        return {
+            "run_id": run_id,
+            "session_id": "session_123",
+            "status": "ready",
+            "dashboard_url": "https://app.argalabs.com/runs/agent_run_123",
+            "environment_url": "https://agent.example.com",
+            "twins": ["slack"],
+        }
+
+    monkeypatch.setattr(main.ApiClient, "probe_agent_sandbox", fake_probe)
+    monkeypatch.setattr(main.ApiClient, "create_agent_sandbox", fake_create)
+    monkeypatch.setattr(main.ApiClient, "get_agent_sandbox", fake_status)
+
+    probe_args = main.build_parser().parse_args(
+        ["previews", "agent-sandboxes", "probe", "--repo", "arga-labs/app", "--branch", "feature/demo"]
+    )
+    assert probe_args.func(probe_args) == 0
+    probe_output = capsys.readouterr().out
+
+    create_args = main.build_parser().parse_args(
+        [
+            "previews",
+            "agent-sandboxes",
+            "create",
+            "--repo",
+            "arga-labs/app",
+            "--branch",
+            "feature/demo",
+            "--framework",
+            "langgraph",
+            "--deploy-mode",
+            "dockerfile",
+            "--port",
+            "8080",
+            "--env",
+            "OPENAI_API_KEY=test",
+            "--twins",
+            "slack",
+            "--infra",
+            "postgres",
+            "--ttl",
+            "90",
+            "--job-timeout",
+            "900",
+        ]
+    )
+    assert create_args.func(create_args) == 0
+    create_output = capsys.readouterr().out
+
+    status_args = main.build_parser().parse_args(["agent-sandboxes", "status", "agent_run_123"])
+    assert status_args.func(status_args) == 0
+    status_output = capsys.readouterr().out
+
+    assert captured["probe"] == {"repo": "arga-labs/app", "branch": "feature/demo"}
+    assert captured["create"]["repo"] == "arga-labs/app"
+    assert captured["create"]["branch"] == "feature/demo"
+    assert captured["create"]["framework"] == "langgraph"
+    assert captured["create"]["deploy"]["mode"] == "dockerfile"
+    assert captured["create"]["deploy"]["app_port"] == 8080
+    assert captured["create"]["app_env"] == {"OPENAI_API_KEY": "test"}
+    assert captured["create"]["twins"] == ["slack"]
+    assert captured["create"]["infra"] == ["postgres"]
+    assert captured["create"]["ttl_minutes"] == 90
+    assert captured["create"]["timeouts"] == {"job_timeout_seconds": 900}
+    assert captured["status"] == "agent_run_123"
+    assert "Framework: langgraph" in probe_output
+    assert "Agent sandbox started." in create_output
+    assert "Run ID: agent_run_123" in status_output
 
 
 def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:

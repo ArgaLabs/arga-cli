@@ -70,6 +70,8 @@ def test_top_level_sandbox_and_twin_run_commands(monkeypatch, capsys) -> None:
             "feature/test",
             "--twins",
             "slack,stripe",
+            "--app-command",
+            "npm run preview",
         ]
     )
     twin_args = main.build_parser().parse_args(
@@ -90,6 +92,7 @@ def test_top_level_sandbox_and_twin_run_commands(monkeypatch, capsys) -> None:
             "twins": ["slack", "stripe"],
             "ttl_minutes": None,
             "env": {},
+            "app_command": "npm run preview",
         },
     )
     assert calls[1][0] == "twin"
