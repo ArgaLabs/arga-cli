@@ -5,53 +5,40 @@ import json
 from arga_cli import main
 
 
-def test_start_pr_run_posts_to_new_endpoint(monkeypatch) -> None:
+def test_start_pr_run_uses_sandbox_runs_endpoint(monkeypatch) -> None:
     client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
     captured: dict[str, object] = {}
 
-    class FakeStream:
+    class FakeResponse:
         status_code = 200
         is_success = True
-        headers = {"X-Run-Id": "run_123", "X-Session-Id": "session_123"}
 
-        def __enter__(self):
-            return self
+        def json(self):
+            return {"sandbox_id": "sandbox_123", "status": "queued", "twins": {}}
 
-        def __exit__(self, *args: object) -> None:
-            return None
-
-        def iter_text(self):
-            yield "data: {}\n\n"
-
-    def fake_stream(method: str, url: str, *, json: dict[str, object], headers: dict[str, str], timeout: float):
-        captured["method"] = method
+    def fake_post(url: str, *, json: dict[str, object], headers: dict[str, str]):
         captured["url"] = url
         captured["json"] = json
         captured["headers"] = headers
-        captured["timeout"] = timeout
-        return FakeStream()
+        return FakeResponse()
 
-    monkeypatch.setattr(client._client, "stream", fake_stream)
+    monkeypatch.setattr(client._client, "post", fake_post)
     try:
         payload = client.start_pr_run(
             repo="arga-labs/validation-server",
             pr_url="https://github.com/arga-labs/validation-server/pull/298",
-            context_notes="focus blocks",
             twins=["slack"],
         )
     finally:
         client.close()
 
-    assert captured["method"] == "POST"
-    assert captured["url"] == "https://api.argalabs.com/validate/pr-run"
+    assert captured["url"] == "https://api.argalabs.com/sandbox-runs"
     assert captured["json"] == {
         "repo": "arga-labs/validation-server",
-        "run_type": "pr_run",
         "pr_url": "https://github.com/arga-labs/validation-server/pull/298",
-        "context_notes": "focus blocks",
         "twins": ["slack"],
     }
-    assert payload == {"run_id": "run_123", "session_id": "session_123", "status": "generating_story"}
+    assert payload == {"run_id": "sandbox_123", "sandbox_id": "sandbox_123", "status": "queued"}
 
 
 def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch) -> None:
@@ -67,7 +54,12 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
         def json(self):
             return self._payload
 
-    def fake_get(url: str, *, headers: dict[str, str], params: dict[str, object] | None = None):
+    def fake_get(
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: dict[str, object] | None = None,
+    ):
         captured.append(("GET", url, params))
         payload: object = [{"name": "linear", "label": "Linear", "kind": "backend", "show_in_ui": True}]
         if url.endswith("/twin-runs/run_123"):
@@ -208,6 +200,83 @@ def test_scenario_presets_use_public_presets_endpoint(monkeypatch, capsys) -> No
     assert "twins: stripe" in output
 
 
+def test_twins_list_does_not_require_login(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: (_ for _ in ()).throw(AssertionError("auth not required")))
+    monkeypatch.setattr(
+        main.ApiClient,
+        "list_twins",
+        lambda self: [{"name": "waterfall", "label": "Waterfall", "kind": "backend", "show_in_ui": True}],
+    )
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    args = main.build_parser().parse_args(["twin-runs", "catalog"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "waterfall" in output
+
+
+def test_test_run_artifact_uses_supported_route(monkeypatch) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {
+                "run_id": "run_123",
+                "filename": "screenshots/final.png",
+                "url": "https://signed.example/final.png",
+            }
+
+    def fake_get(url: str, *, headers: dict[str, str]):
+        captured["url"] = url
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(client._client, "get", fake_get)
+    try:
+        artifact = client.get_demo_run_artifact_url("run_123", "screenshots/final.png")
+    finally:
+        client.close()
+
+    assert captured == {
+        "url": "https://api.argalabs.com/test-runs/run_123/artifacts/screenshots/final.png",
+        "headers": {"Authorization": "Bearer arga_api_key"},
+    }
+    assert artifact == {
+        "run_id": "run_123",
+        "filename": "screenshots/final.png",
+        "url": "https://signed.example/final.png",
+    }
+
+
+def test_test_runner_runs_artifact_prints_signed_url(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+
+    def fake_artifact(self, run_id: str, filename: str):
+        assert run_id == "run_123"
+        assert filename == "screenshots/final.png"
+        return {
+            "run_id": run_id,
+            "filename": filename,
+            "url": "https://signed.example/final.png",
+        }
+
+    monkeypatch.setattr(main.ApiClient, "get_demo_run_artifact_url", fake_artifact)
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+
+    args = main.build_parser().parse_args(["test-runner", "runs", "artifact", "run_123", "screenshots/final.png"])
+    exit_code = args.func(args)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "URL: https://signed.example/final.png" in output
+
+
 def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
     client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
     captured: list[tuple[str, dict[str, object] | None]] = []
@@ -232,18 +301,18 @@ def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
         client.close()
 
     assert captured == [
-            (
-                "https://api.argalabs.com/test-runs",
-                {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/test-runs/runner_run_123/rerun",
-                {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/tests/test_123/run",
-                {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
-            ),
+        (
+            "https://api.argalabs.com/test-runs",
+            {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/test-runs/runner_run_123/rerun",
+            {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/tests/test_123/run",
+            {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
+        ),
     ]
 
 
@@ -253,8 +322,12 @@ def test_test_runner_runs_url_accepts_sandbox_id(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
 
-    def fake_create(self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None):
-        captured.update({"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config})
+    def fake_create(
+        self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None
+    ):
+        captured.update(
+            {"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config}
+        )
         return {"id": "runner_run_123", "status": "queued", "sandbox_id": sandbox_id}
 
     monkeypatch.setattr(main.ApiClient, "create_demo_run", fake_create)
@@ -620,6 +693,7 @@ def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
     }
     assert "Twin provisioning started." in output
     assert "Run ID: linear_run" in output
+
 
 def test_twins_provision_accepts_gitlab(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")

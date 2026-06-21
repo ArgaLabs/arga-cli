@@ -11,7 +11,7 @@ def test_validate_pr_command_prints_run_id(monkeypatch, capsys) -> None:
     def fake_start(self, *, repo: str, pr_number: int):
         assert repo == "arga-labs/validation-server"
         assert pr_number == 182
-        return {"run_id": "run_83921", "status": "queued"}
+        return {"run_id": "sandbox_83921", "sandbox_id": "sandbox_83921", "status": "queued"}
 
     monkeypatch.setattr(main.ApiClient, "start_pr_validation", fake_start)
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
@@ -21,11 +21,11 @@ def test_validate_pr_command_prints_run_id(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert "Starting legacy PR validation..." in output
+    assert "Starting PR sandbox run..." in output
     assert "Repository: arga-labs/validation-server" in output
     assert "PR: #182" in output
-    assert "Legacy validation run started." in output
-    assert "Run ID: run_83921" in output
+    assert "Sandbox run started." in output
+    assert "Sandbox ID: sandbox_83921" in output
     assert "Status: queued" in output
 
 
@@ -33,7 +33,7 @@ def test_validate_pr_json_flag(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
 
     def fake_start(self, *, repo: str, pr_number: int):
-        return {"run_id": "run_83921", "status": "queued"}
+        return {"run_id": "sandbox_83921", "sandbox_id": "sandbox_83921", "status": "queued"}
 
     monkeypatch.setattr(main.ApiClient, "start_pr_validation", fake_start)
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
@@ -46,4 +46,4 @@ def test_validate_pr_json_flag(monkeypatch, capsys) -> None:
 
     assert exit_code == 0
     parsed = json.loads(output)
-    assert parsed == {"run_id": "run_83921", "status": "queued"}
+    assert parsed == {"run_id": "sandbox_83921", "status": "queued"}
