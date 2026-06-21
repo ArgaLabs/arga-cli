@@ -168,7 +168,7 @@ arga previews pr-checks disable arga-labs/validation-server --trigger branch
 
 - `arga previews sandboxes run` starts a branch-backed or PR-backed sandbox preview. Use `--twins`, `--scenario-id`, `--ttl`, and repeated `--env KEY=VALUE` entries to shape the environment.
 - `arga previews sandboxes status/logs/teardown` inspect readiness, stream lifecycle events, or end a sandbox preview.
-- `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
+- `arga previews pr-checks run` starts a GitHub-backed PR sandbox run for a repository and pull request number, PR URL, or branch.
 - `arga previews twins list` shows the supported twin catalog from `validation-server`.
 - `arga previews twins provision` provisions twins without running a browser test. Use `--scenario-id` or `--scenario-prompt` to seed them, and `--private` to keep them behind proxy auth.
 - `arga previews twins extend` / `lock` / `reset` / `teardown` adjust TTL, disable public access, reset seeded state, or end the quickstart session.
@@ -190,6 +190,7 @@ arga test-runner runs url --sandbox-id <sandbox_id> --prompt "test login flow"
 arga test-runner runs list
 arga test-runner runs get <run_id>
 arga test-runner runs logs <run_id>
+arga test-runner runs artifact <run_id> screenshots/final.png
 arga test-runner runs rerun <run_id> --sandbox-id <sandbox_id>
 arga test-runner runs message <run_id> "Use test@example.com"
 ```
@@ -197,7 +198,7 @@ arga test-runner runs message <run_id> "Use test@example.com"
 - `scenarios` supports list/presets/get/create/import/export/update/delete for twin seed scenarios.
 - `arga test-runner scenarios presets` lists built-in presets from the public presets API without requiring login.
 - `tests` supports list/get/create/import/export/edit/delete/run for saved browser tests.
-- `runs` starts URL runs and inspects live demo-runner history/events.
+- `runs` starts URL runs and inspects live demo-runner history/events/artifacts.
 - `--sandbox-id` can attach URL runs, reruns, and saved-test runs to an existing sandbox preview.
 - `arga test url` and `arga scenarios ...` remain as compatibility aliases.
 
@@ -325,7 +326,7 @@ arga runs status "$RUN_ID" --json | jq .status
 # List runs as a JSON array
 arga runs list --repo arga-labs/validation-server --json | jq '.[].run_id'
 
-# Start PR validation and capture result
+# Start a PR sandbox run and capture result
 arga previews pr-checks run --repo arga-labs/validation-server --pr 182 --json
 ```
 
@@ -335,6 +336,7 @@ Commands that support `--json`:
 |---|---|
 | `arga test-runner runs url` | `{"run_id": "...", "status": "..."}` |
 | `arga previews pr-checks run` | `{"run_id": "...", "status": "..."}` |
+| `arga test-runner runs artifact <id> <filename>` | Signed artifact URL object |
 | `arga previews twins list` | Array of twin catalog items |
 | `arga previews twins status <id>` | Full twin provisioning status |
 | `arga test-runner tests list` | Array of saved tests |

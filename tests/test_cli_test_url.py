@@ -5,22 +5,21 @@ import json
 from arga_cli import main
 
 
-def test_start_url_validation_uses_longer_timeout(monkeypatch) -> None:
+def test_start_url_validation_uses_test_runs_endpoint(monkeypatch) -> None:
     client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
     captured: dict[str, object] = {}
 
-    def fake_post(url: str, *, json: dict[str, object], headers: dict[str, str], timeout: float):
+    def fake_post(url: str, *, json: dict[str, object], headers: dict[str, str]):
         captured["url"] = url
         captured["json"] = json
         captured["headers"] = headers
-        captured["timeout"] = timeout
 
         class FakeResponse:
             is_success = True
             status_code = 200
 
             def json(self) -> dict[str, str]:
-                return {"run_id": "run_3421", "status": "queued", "session_id": "session_1"}
+                return {"id": "run_3421", "status": "queued"}
 
         return FakeResponse()
 
@@ -30,10 +29,9 @@ def test_start_url_validation_uses_longer_timeout(monkeypatch) -> None:
     finally:
         client.close()
 
-    assert captured["url"] == "https://api.argalabs.com/validate/url-run"
-    assert captured["json"] == {"url": "https://demo-app.com", "prompt": "test login flow"}
-    assert captured["timeout"] == main.URL_VALIDATION_START_TIMEOUT_SECONDS
-    assert payload == {"run_id": "run_3421", "status": "queued", "session_id": "session_1"}
+    assert captured["url"] == "https://api.argalabs.com/test-runs"
+    assert captured["json"] == {"prompt": "test login flow", "start_url": "https://demo-app.com"}
+    assert payload == {"run_id": "run_3421", "status": "queued"}
 
 
 def test_test_url_command_prints_run_id(monkeypatch, capsys) -> None:

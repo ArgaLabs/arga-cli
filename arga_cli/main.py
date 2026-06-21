@@ -136,37 +136,24 @@ class ApiClient:
         branch: str | None = None,
         pr_url: str | None = None,
     ) -> dict[str, str]:
-        payload: dict[str, object] = {"url": url}
-        if prompt is not None:
-            payload["prompt"] = prompt
         if email or password:
-            payload["credentials"] = {
-                "email": email or "",
-                "password": password or "",
-            }
-        if ttl_minutes is not None:
-            payload["ttl_minutes"] = ttl_minutes
-        if scenario_id:
-            payload["scenario_id"] = scenario_id
+            raise CliError("--email/--password are not supported by the current /test-runs API.")
         if provision_id:
-            payload["provision_id"] = provision_id
-        if twins:
-            payload["twins"] = twins
+            raise CliError("Pre-provisioned twin runs are not attachable to /test-runs. Use --twins directly.")
         if runner_mode:
-            payload["runner_mode"] = runner_mode
-        if repo:
-            payload["repo"] = repo
-        if branch:
-            payload["branch"] = branch
-        if pr_url:
-            payload["pr_url"] = pr_url
-        response = self._client.post(
-            f"{self._api_url}/validate/url-run",
-            json=payload,
-            headers=self._auth_headers(),
-            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
+            raise CliError("--runner-mode is not supported by the current /test-runs API.")
+        run = self.create_demo_run(
+            prompt=prompt or f"Run scenario {scenario_id}.",
+            start_url=url,
+            repo=repo,
+            branch=branch,
+            pr_url=pr_url,
+            scenario_id=scenario_id,
+            twins=twins,
+            ttl_minutes=ttl_minutes,
         )
-        return self._parse_json(response, "Failed to start URL validation")
+        run_id = run.get("run_id") or run.get("id")
+        return {"run_id": str(run_id or "unknown"), "status": str(run.get("status") or "queued")}
 
     def list_scenarios(
         self,
@@ -279,54 +266,24 @@ class ApiClient:
         run_type: str = "pr_run",
         stream: bool = True,
     ) -> dict[str, str]:
-        payload: dict[str, Any] = {"repo": repo, "run_type": run_type}
-        if branch:
-            payload["branch"] = branch
-        if pr_url:
-            payload["pr_url"] = pr_url
         if frontend_url:
-            payload["frontend_url"] = frontend_url
+            raise CliError("--frontend-url is not supported by the current /sandbox-runs API.")
         if context_notes:
-            payload["context_notes"] = context_notes
-        if scenario_prompt:
-            payload["scenario_prompt"] = scenario_prompt
-        if scenario_id:
-            payload["scenario_id"] = scenario_id
-        if twins:
-            payload["twins"] = twins
+            raise CliError("--context-notes is not supported by the current /sandbox-runs API.")
         if session_id:
-            payload["session_id"] = session_id
-
-        if not stream:
-            response = self._client.post(
-                f"{self._api_url}/validate/pr-run",
-                json=payload,
-                headers=self._auth_headers(),
-            )
-            return self._parse_json(response, "Failed to start preview run")
-
-        with self._client.stream(
-            "POST",
-            f"{self._api_url}/validate/pr-run",
-            json=payload,
-            headers=self._auth_headers(),
-            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
-        ) as response:
-            if not response.is_success:
-                try:
-                    detail_payload = json.loads(response.read().decode("utf-8"))
-                except ValueError as exc:
-                    raise CliError("Failed to start preview run") from exc
-                self._parse_json(
-                    httpx.Response(response.status_code, json=detail_payload),
-                    "Failed to start preview run",
-                )
-            run_id = response.headers.get("X-Run-Id")
-            session_id_header = response.headers.get("X-Session-Id")
-            # Drain the story stream so the server can finish its initial planning work.
-            for _ in response.iter_text():
-                pass
-            return {"run_id": run_id or "unknown", "session_id": session_id_header or "", "status": "generating_story"}
+            raise CliError("--session-id is not supported by the current /sandbox-runs API.")
+        if run_type != "pr_run":
+            raise CliError("--run-type is not supported by the current /sandbox-runs API.")
+        sandbox = self.create_sandbox(
+            repo=repo,
+            branch=branch,
+            pr_url=pr_url,
+            twins=twins,
+            scenario_prompt=scenario_prompt,
+            scenario_id=scenario_id,
+        )
+        sandbox_id = str(sandbox.get("sandbox_id") or sandbox.get("run_id") or "unknown")
+        return {"run_id": sandbox_id, "sandbox_id": sandbox_id, "status": str(sandbox.get("status") or "queued")}
 
     def start_pr_validation(
         self,
@@ -422,7 +379,6 @@ class ApiClient:
     def list_twins(self) -> list[dict[str, Any]]:
         response = self._client.get(
             f"{self._api_url}/twins",
-            headers=self._auth_headers(),
         )
         payload = self._parse_json(response, "Failed to list twins")
         if not isinstance(payload, list):
@@ -566,6 +522,16 @@ class ApiClient:
             headers=self._auth_headers(),
         )
         return self._parse_json(response, "Failed to load test runner run")
+
+    def get_demo_run_artifact_url(self, run_id: str, filename: str) -> dict[str, str]:
+        response = self._client.get(
+            f"{self._api_url}/test-runs/{run_id}/artifacts/{filename}",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to load test runner artifact")
+        if not isinstance(payload, dict):
+            raise CliError("Unexpected response from /test-runs artifact endpoint")
+        return {str(key): str(value) for key, value in payload.items()}
 
     def rerun_demo_run(
         self,
@@ -1286,8 +1252,8 @@ def run_test_url(args: argparse.Namespace) -> int:
     twins_arg = _split_csv(getattr(args, "twins", None))
     sandbox_id = getattr(args, "sandbox_id", None)
 
-    if not args.url and not sandbox_id and not twins_arg and not (test_config and test_config.get("starting_url")):
-        raise CliError("--url or --sandbox-id is required (or use --twins to provision twins first).")
+    if not args.url and not sandbox_id and not (test_config and test_config.get("starting_url")):
+        raise CliError("--url or --sandbox-id is required.")
 
     url: str = args.url or ""
 
@@ -1295,36 +1261,6 @@ def run_test_url(args: argparse.Namespace) -> int:
     client = ApiClient(args.api_url, api_key=api_key)
     try:
         ttl_minutes = _resolve_ttl(client, getattr(args, "ttl", None))
-
-        provision_id: str | None = None
-        if twins_arg:
-            from arga_cli.wizard.provision import provision_twins
-
-            status = provision_twins(client, twins_arg, ttl_minutes=ttl_minutes or 30)
-            provision_id = status.get("run_id")
-            _print_twin_env_vars(status)
-
-            if not url and not sandbox_id:
-                print("Deploy your app with the environment variables above.")
-                print("Press Ctrl+C to cancel.\n")
-                try:
-                    url = input("Enter your staging URL: ").strip()
-                except KeyboardInterrupt:
-                    print("\nCancelled.")
-                    return 1
-                if not url:
-                    raise CliError("A URL is required to start the test run.")
-                print()
-            elif url:
-                print(
-                    "Deploy your app with the environment variables above, then press Enter to start the test run."
-                )
-                print("Press Ctrl+C to cancel.\n")
-                try:
-                    input()
-                except KeyboardInterrupt:
-                    print("\nCancelled.")
-                    return 1
 
         if test_config is not None:
             prompt = args.prompt or str(test_config.get("prompt") or "Run this saved browser test.")
@@ -1350,8 +1286,7 @@ def run_test_url(args: argparse.Namespace) -> int:
                     "password": args.password,
                     "ttl_minutes": ttl_minutes,
                     "scenario_id": scenario_id,
-                    "provision_id": provision_id,
-                    "twins": twins_arg if not provision_id else None,
+                    "twins": twins_arg,
                 }
                 for key in ("runner_mode", "repo", "branch", "pr_url"):
                     value = getattr(args, key, None)
@@ -1385,10 +1320,21 @@ def run_validate_pr(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        if any(
-            getattr(args, name, None)
-            for name in ("branch", "pr_url", "frontend_url", "scenario_prompt", "scenario_id", "twins", "session_id")
-        ) or getattr(args, "run_type", "pr_run") != "pr_run":
+        if (
+            any(
+                getattr(args, name, None)
+                for name in (
+                    "branch",
+                    "pr_url",
+                    "frontend_url",
+                    "scenario_prompt",
+                    "scenario_id",
+                    "twins",
+                    "session_id",
+                )
+            )
+            or getattr(args, "run_type", "pr_run") != "pr_run"
+        ):
             payload = client.start_pr_run(
                 repo=args.repo,
                 branch=getattr(args, "branch", None),
@@ -1417,7 +1363,7 @@ def run_validate_pr(args: argparse.Namespace) -> int:
         print(json.dumps(output))
         return 0
 
-    print("Starting legacy PR validation...\n")
+    print("Starting PR sandbox run...\n")
     print(f"Repository: {args.repo}")
     if getattr(args, "pr", None):
         print(f"PR: #{args.pr}\n")
@@ -1425,8 +1371,8 @@ def run_validate_pr(args: argparse.Namespace) -> int:
         print(f"PR URL: {args.pr_url}\n")
     elif getattr(args, "branch", None):
         print(f"Branch: {args.branch}\n")
-    print("Legacy validation run started. Future PR checks should run saved tests instead.")
-    print(f"Run ID: {payload.get('run_id', 'unknown')}")
+    print("Sandbox run started. Run saved tests against it with --sandbox-id when it is ready.")
+    print(f"Sandbox ID: {payload.get('sandbox_id') or payload.get('run_id', 'unknown')}")
     print(f"Status: {payload.get('status', 'unknown')}")
     if payload.get("session_id"):
         print(f"Session ID: {payload['session_id']}")
@@ -1558,8 +1504,7 @@ def run_twins_provision(args: argparse.Namespace) -> int:
 
 
 def run_twins_list(args: argparse.Namespace) -> int:
-    api_key = load_api_key()
-    client = ApiClient(args.api_url, api_key=api_key)
+    client = ApiClient(args.api_url)
     try:
         twins = client.list_twins()
     finally:
@@ -1902,16 +1847,12 @@ def _validate_help_text() -> str:
 def _build_validate_pr_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="arga validate pr",
-        description="Run PR validation.",
+        description="Create a PR sandbox run.",
         allow_abbrev=False,
     )
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     parser.add_argument("--pr", required=True, type=int, help="Pull request number")
-    parser.add_argument(
-        "--context-notes",
-        help="Optional notes to focus the validation on specific changes",
-    )
     parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     parser.set_defaults(deprecated_alias=True)
     return parser
@@ -1951,6 +1892,7 @@ def _build_validate_config_set_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
     parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
     return parser
+
 
 def _bool_label(value: bool) -> str:
     return "yes" if value else "no"
@@ -2546,6 +2488,24 @@ def run_demo_runs_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_demo_runs_artifact(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        artifact = client.get_demo_run_artifact_url(args.run_id, args.filename)
+    finally:
+        client.close()
+
+    if args.json:
+        print(json.dumps(artifact, indent=2))
+        return 0
+
+    print(f"Run ID: {artifact.get('run_id', args.run_id)}")
+    print(f"Filename: {artifact.get('filename', args.filename)}")
+    print(f"URL: {artifact.get('url', '-')}")
+    return 0
+
+
 def run_demo_runs_rerun(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
@@ -2614,7 +2574,9 @@ def _test_payload_from_file(path: str) -> dict[str, Any]:
     if "test_config_json" in payload and "test_config" not in payload:
         payload["test_config"] = payload.pop("test_config_json")
     if "test_config" in payload:
-        config = _normalized_test_config(_extract_test_config(payload["test_config"] if isinstance(payload["test_config"], dict) else payload))
+        config = _normalized_test_config(
+            _extract_test_config(payload["test_config"] if isinstance(payload["test_config"], dict) else payload)
+        )
         _assert_valid_test_config(config)
         payload["test_config"] = config
     return payload
@@ -3303,7 +3265,9 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_create_parser.add_argument("--name", required=True, help="Scenario name")
     scenarios_create_parser.add_argument("--prompt", required=True, help="Natural-language twin state")
     scenarios_create_parser.add_argument("--description", default=None, help="Optional description")
-    scenarios_create_parser.add_argument("--twin", action="append", default=None, help="Restrict to a twin (repeatable)")
+    scenarios_create_parser.add_argument(
+        "--twin", action="append", default=None, help="Restrict to a twin (repeatable)"
+    )
     scenarios_create_parser.add_argument("--tag", action="append", default=None, help="Tag the scenario (repeatable)")
     scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
     scenarios_create_parser.set_defaults(func=run_scenarios_create, deprecated_alias=deprecated_alias)
@@ -3440,6 +3404,13 @@ def _add_demo_run_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     logs_parser.add_argument("run_id")
     logs_parser.add_argument("--json", action="store_true", default=False)
     logs_parser.set_defaults(func=run_demo_runs_logs)
+
+    artifact_parser = subparsers.add_parser("artifact", help="Print a signed URL for a test run artifact")
+    artifact_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    artifact_parser.add_argument("run_id")
+    artifact_parser.add_argument("filename", help="Artifact path, for example screenshots/final.png")
+    artifact_parser.add_argument("--json", action="store_true", default=False)
+    artifact_parser.set_defaults(func=run_demo_runs_artifact)
 
     rerun_parser = subparsers.add_parser("rerun", help="Rerun a test runner run")
     rerun_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -3654,20 +3625,16 @@ def build_parser() -> argparse.ArgumentParser:
     pr_checks_subparsers = pr_checks_parser.add_subparsers(dest="pr_checks_command", required=True)
     pr_checks_run_parser = pr_checks_subparsers.add_parser(
         "run",
-        help="Legacy: start a PR validation run (future PR checks should run saved tests)",
+        help="Create a PR sandbox run",
     )
     pr_checks_run_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     pr_checks_run_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     pr_checks_run_parser.add_argument("--pr-url", default=None, help="Pull request URL")
     pr_checks_run_parser.add_argument("--pr", type=int, default=None, help="Pull request number")
     pr_checks_run_parser.add_argument("--branch", default=None, help="Branch to validate")
-    pr_checks_run_parser.add_argument("--frontend-url", default=None, help="Frontend URL to validate")
-    pr_checks_run_parser.add_argument("--context-notes", default=None, help="Additional instructions")
     pr_checks_run_parser.add_argument("--scenario-prompt", default=None, help="Scenario seed prompt for twins")
     pr_checks_run_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
     pr_checks_run_parser.add_argument("--twins", default=None, help="Comma-separated twins to include")
-    pr_checks_run_parser.add_argument("--session-id", default=None, help="Reuse an existing validation session")
-    pr_checks_run_parser.add_argument("--run-type", default="pr_run", choices=("pr_run", "agent_run"))
     pr_checks_run_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     pr_checks_run_parser.set_defaults(func=run_validate_pr)
     pr_checks_install_parser = pr_checks_subparsers.add_parser("install", help="Install automatic PR checks")
@@ -3689,7 +3656,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr_checks_config_set_parser.add_argument("repo", help="Repository in owner/repo format")
     pr_checks_config_set_parser.add_argument("--trigger", choices=("pr", "branch"), help="Validation trigger mode")
     pr_checks_config_set_parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
-    pr_checks_config_set_parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
+    pr_checks_config_set_parser.add_argument(
+        "--comments", choices=("on", "off"), help="Whether PR comments are enabled"
+    )
     pr_checks_config_set_parser.set_defaults(func=run_validate_config_set)
     pr_checks_enabled_parser = pr_checks_subparsers.add_parser("enabled", help="List enabled PR check configs")
     pr_checks_enabled_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -3831,7 +3800,6 @@ def build_parser() -> argparse.ArgumentParser:
     validate_pr_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     validate_pr_parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
     validate_pr_parser.add_argument("--pr", required=True, type=int, help="Pull request number")
-    validate_pr_parser.add_argument("--context-notes", default=None, help="Additional instructions or context")
     validate_pr_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
     validate_pr_parser.set_defaults(func=run_validate_pr, deprecated_alias=True)
 
