@@ -264,6 +264,65 @@ class ApiClient:
         )
         return self._parse_json(response, "Failed to delete scenario")
 
+    def ensure_scenario_twin_environment(
+        self,
+        scenario_id: str,
+        *,
+        twins: list[str] | None = None,
+        public: bool = True,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"public": public}
+        if twins:
+            payload["twins"] = twins
+        response = self._client.post(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=URL_VALIDATION_START_TIMEOUT_SECONDS,
+        )
+        return self._parse_json(response, "Failed to create scenario twin environment")
+
+    def get_scenario_twin_environment(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to load scenario twin environment")
+
+    def reseed_scenario_twin_environment(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment/reseed",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to reseed scenario twin environment")
+
+    def delete_scenario_twin_environment(self, scenario_id: str) -> dict[str, Any]:
+        response = self._client.delete(
+            f"{self._api_url}/scenarios/{scenario_id}/twin-environment",
+            headers=self._auth_headers(),
+        )
+        return self._parse_json(response, "Failed to delete scenario twin environment")
+
+    def list_scenario_twin_environments(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/scenario-twin-environments",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list scenario twin environments")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /scenario-twin-environments")
+        return payload
+
+    def list_scenario_long_runs(self) -> list[dict[str, Any]]:
+        response = self._client.get(
+            f"{self._api_url}/scenarios/long-runs",
+            headers=self._auth_headers(),
+        )
+        payload = self._parse_json(response, "Failed to list scenario long runs")
+        if not isinstance(payload, list):
+            raise CliError("Unexpected response from /scenarios/long-runs")
+        return payload
+
     def start_pr_run(
         self,
         *,
@@ -1316,9 +1375,7 @@ def run_test_url(args: argparse.Namespace) -> int:
                     raise CliError("A URL is required to start the test run.")
                 print()
             elif url:
-                print(
-                    "Deploy your app with the environment variables above, then press Enter to start the test run."
-                )
+                print("Deploy your app with the environment variables above, then press Enter to start the test run.")
                 print("Press Ctrl+C to cancel.\n")
                 try:
                     input()
@@ -1385,10 +1442,21 @@ def run_validate_pr(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        if any(
-            getattr(args, name, None)
-            for name in ("branch", "pr_url", "frontend_url", "scenario_prompt", "scenario_id", "twins", "session_id")
-        ) or getattr(args, "run_type", "pr_run") != "pr_run":
+        if (
+            any(
+                getattr(args, name, None)
+                for name in (
+                    "branch",
+                    "pr_url",
+                    "frontend_url",
+                    "scenario_prompt",
+                    "scenario_id",
+                    "twins",
+                    "session_id",
+                )
+            )
+            or getattr(args, "run_type", "pr_run") != "pr_run"
+        ):
             payload = client.start_pr_run(
                 repo=args.repo,
                 branch=getattr(args, "branch", None),
@@ -1752,6 +1820,173 @@ def _print_scenarios(scenarios: list[dict[str, Any]]) -> None:
         print()
 
 
+def _print_scenario_environment(env: dict[str, Any]) -> None:
+    print(f"Environment ID: {env.get('id') or '-'}")
+    print(f"Scenario ID: {env.get('scenario_id') or '-'}")
+    print(f"Run ID: {env.get('run_id') or '-'}")
+    print(f"Status: {env.get('status') or 'unknown'}")
+    print(f"Public: {_bool_label(bool(env.get('public', True)))}")
+    requested_twins = env.get("requested_twins")
+    if isinstance(requested_twins, list) and requested_twins:
+        print(f"Requested twins: {', '.join(str(twin) for twin in requested_twins)}")
+    if env.get("dashboard_url"):
+        print(f"Dashboard URL: {env['dashboard_url']}")
+    if env.get("last_seeded_at"):
+        print(f"Last seeded: {_format_timestamp(env.get('last_seeded_at'))}")
+    if env.get("error"):
+        print(f"Error: {env['error']}")
+    twins = env.get("twins")
+    if isinstance(twins, dict) and twins:
+        print("Twins:")
+        for name, info in sorted(twins.items()):
+            if not isinstance(info, dict):
+                continue
+            print(f"  {name}: {info.get('base_url') or '-'}")
+
+
+def _print_scenario_environments(envs: list[dict[str, Any]]) -> None:
+    if not envs:
+        print("No scenario twin environments found.")
+        return
+    headers = ["SCENARIO", "RUN", "STATUS", "PUBLIC", "TWINS"]
+    rows = [
+        [
+            str(env.get("scenario_id") or "-"),
+            str(env.get("run_id") or "-"),
+            str(env.get("status") or "unknown"),
+            _bool_label(bool(env.get("public", True))),
+            ", ".join(str(twin) for twin in (env.get("requested_twins") or [])) or "-",
+        ]
+        for env in envs
+    ]
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+
+
+def _print_scenario_long_runs(long_runs: list[dict[str, Any]]) -> None:
+    if not long_runs:
+        print("No active scenario long runs found.")
+        return
+    headers = ["SCENARIO", "RUN", "STATUS", "UPDATED"]
+    rows: list[list[str]] = []
+    for item in long_runs:
+        run = item.get("run") if isinstance(item.get("run"), dict) else {}
+        rows.append(
+            [
+                str(item.get("scenario_id") or "-"),
+                str(run.get("run_id") or "-"),
+                str(run.get("status") or "unknown"),
+                _format_timestamp(item.get("updated_at")),
+            ]
+        )
+    widths = [
+        max(len(headers[index]), max((len(row[index]) for row in rows), default=0)) for index in range(len(headers))
+    ]
+    print(" | ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print(" | ".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(row[index].ljust(widths[index]) for index in range(len(headers))))
+
+
+def run_scenario_environment_list(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        envs = client.list_scenario_twin_environments()
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(envs, indent=2))
+        return 0
+    _print_scenario_environments(envs)
+    return 0
+
+
+def run_scenario_environment_ensure(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.ensure_scenario_twin_environment(
+            args.scenario_id,
+            twins=_split_csv(getattr(args, "twins", None)),
+            public=not getattr(args, "private", False),
+        )
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_environment_status(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.get_scenario_twin_environment(args.scenario_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_environment_reseed(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.reseed_scenario_twin_environment(args.scenario_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_environment_delete(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        env = client.delete_scenario_twin_environment(args.scenario_id)
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(env, indent=2))
+        return 0
+    _print_scenario_environment(env)
+    return 0
+
+
+def run_scenario_long_runs(args: argparse.Namespace) -> int:
+    api_key = load_api_key()
+    client = ApiClient(args.api_url, api_key=api_key)
+    try:
+        long_runs = client.list_scenario_long_runs()
+    finally:
+        client.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(long_runs, indent=2))
+        return 0
+    _print_scenario_long_runs(long_runs)
+    return 0
+
+
 def run_scenarios_presets(args: argparse.Namespace) -> int:
     _warn_deprecated_alias(args, "arga test-runner scenarios presets")
     client = ApiClient(args.api_url)
@@ -1951,6 +2186,7 @@ def _build_validate_config_set_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
     parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
     return parser
+
 
 def _bool_label(value: bool) -> str:
     return "yes" if value else "no"
@@ -2614,7 +2850,9 @@ def _test_payload_from_file(path: str) -> dict[str, Any]:
     if "test_config_json" in payload and "test_config" not in payload:
         payload["test_config"] = payload.pop("test_config_json")
     if "test_config" in payload:
-        config = _normalized_test_config(_extract_test_config(payload["test_config"] if isinstance(payload["test_config"], dict) else payload))
+        config = _normalized_test_config(
+            _extract_test_config(payload["test_config"] if isinstance(payload["test_config"], dict) else payload)
+        )
         _assert_valid_test_config(config)
         payload["test_config"] = config
     return payload
@@ -3303,7 +3541,9 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_create_parser.add_argument("--name", required=True, help="Scenario name")
     scenarios_create_parser.add_argument("--prompt", required=True, help="Natural-language twin state")
     scenarios_create_parser.add_argument("--description", default=None, help="Optional description")
-    scenarios_create_parser.add_argument("--twin", action="append", default=None, help="Restrict to a twin (repeatable)")
+    scenarios_create_parser.add_argument(
+        "--twin", action="append", default=None, help="Restrict to a twin (repeatable)"
+    )
     scenarios_create_parser.add_argument("--tag", action="append", default=None, help="Tag the scenario (repeatable)")
     scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
     scenarios_create_parser.set_defaults(func=run_scenarios_create, deprecated_alias=deprecated_alias)
@@ -3332,6 +3572,54 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_delete_parser.add_argument("scenario_id", help="Scenario ID to delete")
     scenarios_delete_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
     scenarios_delete_parser.set_defaults(func=run_scenarios_delete, deprecated_alias=deprecated_alias)
+
+    scenarios_environment_parser = subparsers.add_parser(
+        "environment",
+        help="Manage a scenario's reusable twin environment",
+    )
+    environment_subparsers = scenarios_environment_parser.add_subparsers(
+        dest="environment_command",
+        required=True,
+    )
+
+    environment_list_parser = environment_subparsers.add_parser("list", help="List scenario twin environments")
+    environment_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_list_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_list_parser.set_defaults(func=run_scenario_environment_list)
+
+    environment_ensure_parser = environment_subparsers.add_parser(
+        "ensure",
+        help="Create or reuse a scenario twin environment",
+    )
+    environment_ensure_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_ensure_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_ensure_parser.add_argument("--twins", default=None, help="Comma-separated twins to provision")
+    environment_ensure_parser.add_argument("--private", action="store_true", default=False, help="Require proxy auth")
+    environment_ensure_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_ensure_parser.set_defaults(func=run_scenario_environment_ensure)
+
+    environment_status_parser = environment_subparsers.add_parser("status", help="Show scenario environment status")
+    environment_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_status_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_status_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_status_parser.set_defaults(func=run_scenario_environment_status)
+
+    environment_reseed_parser = environment_subparsers.add_parser("reseed", help="Reseed a ready scenario environment")
+    environment_reseed_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_reseed_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_reseed_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_reseed_parser.set_defaults(func=run_scenario_environment_reseed)
+
+    environment_delete_parser = environment_subparsers.add_parser("delete", help="Delete a scenario environment")
+    environment_delete_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    environment_delete_parser.add_argument("scenario_id", help="Scenario ID")
+    environment_delete_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    environment_delete_parser.set_defaults(func=run_scenario_environment_delete)
+
+    scenarios_long_runs_parser = subparsers.add_parser("long-runs", help="List active scenario twin runs")
+    scenarios_long_runs_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
+    scenarios_long_runs_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    scenarios_long_runs_parser.set_defaults(func=run_scenario_long_runs)
 
 
 def _add_saved_test_parsers(subparsers: argparse._SubParsersAction) -> None:
@@ -3689,7 +3977,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr_checks_config_set_parser.add_argument("repo", help="Repository in owner/repo format")
     pr_checks_config_set_parser.add_argument("--trigger", choices=("pr", "branch"), help="Validation trigger mode")
     pr_checks_config_set_parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
-    pr_checks_config_set_parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
+    pr_checks_config_set_parser.add_argument(
+        "--comments", choices=("on", "off"), help="Whether PR comments are enabled"
+    )
     pr_checks_config_set_parser.set_defaults(func=run_validate_config_set)
     pr_checks_enabled_parser = pr_checks_subparsers.add_parser("enabled", help="List enabled PR check configs")
     pr_checks_enabled_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
