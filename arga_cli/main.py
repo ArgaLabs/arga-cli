@@ -1747,9 +1747,15 @@ def _print_scenarios(scenarios: list[dict[str, Any]]) -> None:
         print(f"{s.get('id')}  {s.get('name')}{marker}")
         if s.get("description"):
             print(f"  description: {s['description']}")
+        _print_scenario_created_at(s)
         print(f"  twins: {twins}")
         print(f"  tags: {tags}")
         print()
+
+
+def _print_scenario_created_at(scenario: dict[str, Any]) -> None:
+    if created_at := scenario.get("created_at"):
+        print(f"  created: {created_at}")
 
 
 def run_scenarios_presets(args: argparse.Namespace) -> int:
@@ -1798,6 +1804,7 @@ def run_scenarios_create(args: argparse.Namespace) -> int:
     print("Scenario created.")
     print(f"  id: {scenario.get('id')}")
     print(f"  name: {scenario.get('name')}")
+    _print_scenario_created_at(scenario)
     if scenario.get("twins"):
         print(f"  twins: {', '.join(scenario['twins'])}")
     return 0
@@ -1837,6 +1844,7 @@ def run_scenarios_import(args: argparse.Namespace) -> int:
         print("Scenario imported.")
         print(f"  id: {scenario.get('id')}")
         print(f"  name: {scenario.get('name')}")
+        _print_scenario_created_at(scenario)
     return 0
 
 
@@ -1869,6 +1877,7 @@ def run_scenarios_update(args: argparse.Namespace) -> int:
         print("Scenario updated.")
         print(f"  id: {scenario.get('id')}")
         print(f"  name: {scenario.get('name')}")
+        _print_scenario_created_at(scenario)
     return 0
 
 

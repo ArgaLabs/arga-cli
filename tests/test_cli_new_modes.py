@@ -208,6 +208,74 @@ def test_scenario_presets_use_public_presets_endpoint(monkeypatch, capsys) -> No
     assert "twins: stripe" in output
 
 
+def test_scenario_list_surfaces_created_at_in_human_and_json_output(monkeypatch, capsys) -> None:
+    scenarios = [
+        {
+            "id": "scenario_123",
+            "name": "Release readiness",
+            "description": "Check the release across providers",
+            "twins": ["github", "linear"],
+            "tags": ["benchmark"],
+            "created_at": "2026-07-20T19:42:11.123456+00:00",
+        }
+    ]
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(
+        main.ApiClient,
+        "list_scenarios",
+        lambda self, *, include_presets=False, twin=None, tag=None: scenarios,
+    )
+
+    human_args = main.build_parser().parse_args(["test-runner", "scenarios", "list"])
+    assert human_args.func(human_args) == 0
+    human_output = capsys.readouterr().out
+
+    assert "scenario_123  Release readiness" in human_output
+    assert "created: 2026-07-20T19:42:11.123456+00:00" in human_output
+
+    json_args = main.build_parser().parse_args(["test-runner", "scenarios", "list", "--json"])
+    assert json_args.func(json_args) == 0
+
+    assert json.loads(capsys.readouterr().out)[0]["created_at"] == "2026-07-20T19:42:11.123456+00:00"
+
+
+def test_scenario_delete_uses_supported_route_and_cli_output(monkeypatch, capsys) -> None:
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {"status": "deleted"}
+
+    def fake_delete(url: str, *, headers: dict[str, str]):
+        captured["url"] = url
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(client._client, "delete", fake_delete)
+    try:
+        assert client.delete_scenario("scenario_123") == {"status": "deleted"}
+    finally:
+        client.close()
+
+    assert captured == {
+        "url": "https://api.argalabs.com/scenarios/scenario_123",
+        "headers": {"Authorization": "Bearer arga_api_key"},
+    }
+
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main.ApiClient, "delete_scenario", lambda self, scenario_id: {"status": "deleted"})
+
+    args = main.build_parser().parse_args(["test-runner", "scenarios", "delete", "scenario_123"])
+    assert args.func(args) == 0
+    assert capsys.readouterr().out == "Deleted scenario scenario_123.\n"
+
+
 def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
     client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
     captured: list[tuple[str, dict[str, object] | None]] = []
