@@ -181,6 +181,7 @@ arga previews pr-checks disable arga-labs/validation-server --trigger branch
 ```bash
 arga test-runner scenarios list --include-presets
 arga test-runner scenarios import --file scenario.json
+arga test-runner scenarios delete <scenario_id>
 arga test-runner tests list --repo arga-labs/app
 arga test-runner tests import --file saved-test.json
 arga test-runner tests edit <test_id>
@@ -194,7 +195,8 @@ arga test-runner runs rerun <run_id> --sandbox-id <sandbox_id>
 arga test-runner runs message <run_id> "Use test@example.com"
 ```
 
-- `scenarios` supports list/presets/get/create/import/export/update/delete for twin seed scenarios.
+- `scenarios` supports list/presets/get/create/import/export/update/delete for twin seed scenarios. Human-readable
+  list/create/import/update output includes the server-recorded creation time; JSON output preserves `created_at`.
 - `arga test-runner scenarios presets` lists built-in presets from the public presets API without requiring login.
 - `tests` supports list/get/create/import/export/edit/delete/run for saved browser tests.
 - `runs` starts URL runs and inspects live demo-runner history/events.
