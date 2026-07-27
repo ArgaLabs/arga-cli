@@ -95,6 +95,42 @@ def test_twins_provision_rejects_empty_twin_list(monkeypatch) -> None:
         args.func(args)
 
 
+def test_twin_run_candidate_safe_flag_requests_api_only_surface(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured: dict[str, object] = {}
+
+    def fake_start(self, **kwargs):
+        captured.update(kwargs)
+        return {"run_id": "run_candidate_safe", "status": "queued"}
+
+    monkeypatch.setattr(main.ApiClient, "provision_twins_start", fake_start)
+
+    args = main.build_parser().parse_args(
+        [
+            "twin-runs",
+            "create",
+            "--twins",
+            "github,slack",
+            "--ttl",
+            "30",
+            "--candidate-safe",
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert captured == {
+        "twins": ["github", "slack"],
+        "ttl_minutes": 30,
+        "scenario_prompt": None,
+        "scenario_id": None,
+        "public": True,
+        "access_profile": "candidate_api_only",
+    }
+    assert "run_candidate_safe" in capsys.readouterr().out
+
+
 def test_twins_list_json_keeps_machine_readable_catalog_shape(monkeypatch, capsys) -> None:
     catalog = [
         {"name": "slack", "label": "Slack", "kind": "frontend", "show_in_ui": True},
