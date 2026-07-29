@@ -110,6 +110,7 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
             scenario_prompt="seed",
             scenario_id="scenario_123",
             public=False,
+            access_profile="candidate_api_only",
         )
         client.get_twin_provision_status("run_123")
         client.extend_twins("run_123", ttl_minutes=75)
@@ -145,6 +146,7 @@ def test_preview_api_methods_use_supported_validation_server_routes(monkeypatch)
                 "scenario_prompt": "seed",
                 "scenario_id": "scenario_123",
                 "public": False,
+                "access_profile": "candidate_api_only",
             },
         ),
         ("GET", "https://api.argalabs.com/twin-runs/run_123", None),

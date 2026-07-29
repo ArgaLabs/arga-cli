@@ -405,6 +405,7 @@ class ApiClient:
         scenario_prompt: str | None = None,
         scenario_id: str | None = None,
         public: bool = True,
+        access_profile: str = "full",
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"twins": twins, "ttl_minutes": ttl_minutes, "scenario": "quickstart"}
         if scenario_prompt:
@@ -412,6 +413,8 @@ class ApiClient:
         if scenario_id:
             payload["scenario_id"] = scenario_id
         payload["public"] = public
+        if access_profile != "full":
+            payload["access_profile"] = access_profile
         response = self._client.post(
             f"{self._api_url}/twin-runs",
             json=payload,
@@ -1525,13 +1528,16 @@ def run_twins_provision(args: argparse.Namespace) -> int:
     client = ApiClient(args.api_url, api_key=api_key)
     try:
         ttl_minutes = _resolve_ttl(client, args.ttl)
-        status = client.provision_twins_start(
-            twins=twins,
-            ttl_minutes=ttl_minutes or 30,
-            scenario_prompt=getattr(args, "scenario_prompt", None),
-            scenario_id=getattr(args, "scenario_id", None),
-            public=not getattr(args, "private", False),
-        )
+        provision_kwargs: dict[str, Any] = {
+            "twins": twins,
+            "ttl_minutes": ttl_minutes or 30,
+            "scenario_prompt": getattr(args, "scenario_prompt", None),
+            "scenario_id": getattr(args, "scenario_id", None),
+            "public": not getattr(args, "private", False),
+        }
+        if getattr(args, "candidate_safe", False):
+            provision_kwargs["access_profile"] = "candidate_api_only"
+        status = client.provision_twins_start(**provision_kwargs)
         run_id = str(status.get("run_id") or "")
         if not run_id:
             raise CliError("Twin provisioning did not return a run_id.")
@@ -3527,6 +3533,12 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
         default=False,
         help="Keep twins behind proxy auth instead of using public base URLs",
     )
+    create_parser.add_argument(
+        "--candidate-safe",
+        action="store_true",
+        default=False,
+        help="Expose provider data-plane APIs only; hide twin UI, root, OpenAPI, schema discovery, and control paths",
+    )
     create_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
     create_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
     create_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
@@ -3748,6 +3760,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Keep twins behind proxy auth instead of using public base URLs",
+    )
+    twins_provision_parser.add_argument(
+        "--candidate-safe",
+        action="store_true",
+        default=False,
+        help="Expose provider data-plane APIs only; hide twin UI, root, OpenAPI, schema discovery, and control paths",
     )
     twins_provision_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
     twins_provision_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
