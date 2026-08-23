@@ -173,7 +173,7 @@ arga previews pr-checks disable arga-labs/validation-server --trigger branch
 - `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
 - `arga previews twins list` shows the supported twin catalog from `validation-server`.
 - `arga previews twins provision` provisions twins without running a browser test. Use `--scenario-id` or `--scenario-prompt` to seed them, `--private` to keep them behind proxy auth, and `--candidate-safe` to expose only provider data-plane APIs on the public candidate host. Candidate-safe runs hide the twin root/UI, twin-hosted documentation and OpenAPI/schema discovery, and control-plane routes; trusted authenticated admin URLs remain available for seeding and verification.
-- Google Drive, Google Docs, and Google Sheets are independent twins. Provision all three when a `gws` workflow crosses service boundaries. Their preset Docs and Sheets resources use matching stable IDs, but mutations do not synchronize between twin processes.
+- Google Drive, Google Docs, and Google Sheets are independent twins. Docs and Sheets each expose their provider-compatible API and an interactive editor UI. Provision all three when a `gws` workflow crosses service boundaries. Their preset Docs and Sheets resources use matching stable IDs, but mutations do not synchronize between twin processes.
 - `arga previews twins extend` / `lock` / `reset` / `teardown` adjust TTL, disable public access, reset seeded state, or end the quickstart session.
 - `arga previews pr-checks install/config/config-set/enabled/enable/disable` manage automatic PR check settings.
 

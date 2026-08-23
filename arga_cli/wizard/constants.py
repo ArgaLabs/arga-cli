@@ -41,13 +41,13 @@ TWIN_CATALOG: dict[str, dict] = {
         "label": "Google Docs",
         "port": 12139,
         "intercept_domains": ["docs.googleapis.com", "www.googleapis.com/discovery/v1/apis/docs/v1/rest"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "google_sheets": {
         "label": "Google Sheets",
         "port": 12137,
         "intercept_domains": ["sheets.googleapis.com", "www.googleapis.com/discovery/v1/apis/sheets/v4/rest"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     },
     "google_workspace": {
         "label": "Google Workspace",
@@ -523,12 +523,12 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         "Editor token: ya29.drive-twin-editor",
     ],
     "google_docs": [
-        "Google Docs v1 API emulator ready",
+        "Google Docs v1 API and editor UI ready",
         'Preset document: "Launch notes" (google-docs-launch-notes)',
         "Access token: ya29.drive-twin-owner",
     ],
     "google_sheets": [
-        "Google Sheets v4 API emulator ready",
+        "Google Sheets v4 API and spreadsheet UI ready",
         'Preset spreadsheet: "Launch plan" (google-sheets-launch-plan)',
         "Access token: ya29.drive-twin-owner",
     ],

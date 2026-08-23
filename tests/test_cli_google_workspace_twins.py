@@ -10,12 +10,19 @@ def test_google_workspace_services_are_independent_cli_twins() -> None:
         "label": "Google Docs",
         "port": 12139,
         "intercept_domains": ["docs.googleapis.com", "www.googleapis.com/discovery/v1/apis/docs/v1/rest"],
-        "show_in_ui": False,
+        "show_in_ui": True,
     }
-    assert TWIN_CATALOG["google_sheets"]["port"] == 12137
+    assert TWIN_CATALOG["google_sheets"] == {
+        "label": "Google Sheets",
+        "port": 12137,
+        "intercept_domains": ["sheets.googleapis.com", "www.googleapis.com/discovery/v1/apis/sheets/v4/rest"],
+        "show_in_ui": True,
+    }
     assert TWIN_CATALOG["google_workspace"]["port"] == 12138
     assert "Preset metadata" in QUICKSTART_SUMMARIES["google_drive"][1]
+    assert "editor UI" in QUICKSTART_SUMMARIES["google_docs"][0]
     assert "google-docs-launch-notes" in QUICKSTART_SUMMARIES["google_docs"][1]
+    assert "spreadsheet UI" in QUICKSTART_SUMMARIES["google_sheets"][0]
     assert "google-sheets-launch-plan" in QUICKSTART_SUMMARIES["google_sheets"][1]
 
 
