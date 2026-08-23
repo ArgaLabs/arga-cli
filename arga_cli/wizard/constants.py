@@ -34,7 +34,30 @@ TWIN_CATALOG: dict[str, dict] = {
     "google_drive": {
         "label": "Google Drive",
         "port": 12115,
-        "intercept_domains": ["www.googleapis.com/drive/v3", "content.googleapis.com"],
+        "intercept_domains": ["www.googleapis.com/drive/v3", "content.googleapis.com", "docs.googleapis.com"],
+        "show_in_ui": True,
+    },
+    "google_sheets": {
+        "label": "Google Sheets",
+        "port": 12137,
+        "intercept_domains": ["sheets.googleapis.com"],
+        "show_in_ui": False,
+    },
+    "google_workspace": {
+        "label": "Google Workspace",
+        "port": 12138,
+        "intercept_domains": [
+            "people.googleapis.com",
+            "workspaceevents.googleapis.com",
+            "script.googleapis.com",
+            "pubsub.googleapis.com",
+        ],
+        "show_in_ui": False,
+    },
+    "datadog": {
+        "label": "Datadog",
+        "port": 12136,
+        "intercept_domains": ["api.datadoghq.com", "http-intake.logs.datadoghq.com"],
         "show_in_ui": True,
     },
     "dropbox": {
@@ -163,6 +186,40 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
             "GOOGLE_CLIENT_ID": "google-twin-client-id",
             "GOOGLE_CLIENT_SECRET": "google-twin-client-secret",
             "GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner",
+        },
+    },
+    "google_sheets": {
+        "token_vars": ["GOOGLE_ACCESS_TOKEN", "GOOGLE_SHEETS_TOKEN", "GOOGLE_SHEETS_ACCESS_TOKEN"],
+        "url_vars": ["GOOGLE_SHEETS_API_URL", "GOOGLE_SHEETS_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner",
+            "GOOGLE_SHEETS_TOKEN": "ya29.drive-twin-owner",
+            "GOOGLE_SHEETS_ACCESS_TOKEN": "ya29.drive-twin-owner",
+        },
+    },
+    "google_workspace": {
+        "token_vars": ["GOOGLE_ACCESS_TOKEN", "GOOGLE_WORKSPACE_TOKEN", "GOOGLE_WORKSPACE_ACCESS_TOKEN"],
+        "url_vars": ["GOOGLE_WORKSPACE_API_URL", "GOOGLE_WORKSPACE_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner",
+            "GOOGLE_WORKSPACE_TOKEN": "ya29.drive-twin-owner",
+            "GOOGLE_WORKSPACE_ACCESS_TOKEN": "ya29.drive-twin-owner",
+        },
+    },
+    "datadog": {
+        "token_vars": ["DD_API_KEY", "DATADOG_API_KEY", "DD_APP_KEY", "DATADOG_APP_KEY", "DD_ACCESS_TOKEN"],
+        "url_vars": ["DD_API_URL", "DATADOG_API_URL", "DD_BASE_URL", "DATADOG_BASE_URL", "DD_SITE", "DATADOG_SITE"],
+        "secret_vars": [],
+        "defaults": {
+            "DD_API_KEY": "ddapi_twin_0000000000000000000000000001",
+            "DATADOG_API_KEY": "ddapi_twin_0000000000000000000000000001",
+            "DD_APP_KEY": "ddapp_twin_0000000000000000000000000001",
+            "DATADOG_APP_KEY": "ddapp_twin_0000000000000000000000000001",
+            "DD_ACCESS_TOKEN": "ddoauth_twin_00000000000000000000000001",
+            "DD_SITE": "datadoghq.com",
+            "DATADOG_SITE": "datadoghq.com",
         },
     },
     "dropbox": {
@@ -389,6 +446,31 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "google-twin-client-id",
         "confidence": "high",
     },
+    # Datadog
+    {
+        "twin": "datadog",
+        "label": "Datadog API key (ddapi_...)",
+        "pattern": r"^ddapi_",
+        "category": "token",
+        "default_value": "ddapi_twin_0000000000000000000000000001",
+        "confidence": "high",
+    },
+    {
+        "twin": "datadog",
+        "label": "Datadog application key (ddapp_...)",
+        "pattern": r"^ddapp_",
+        "category": "token",
+        "default_value": "ddapp_twin_0000000000000000000000000001",
+        "confidence": "high",
+    },
+    {
+        "twin": "datadog",
+        "label": "Datadog OAuth token (ddoauth_...)",
+        "pattern": r"^ddoauth_",
+        "category": "token",
+        "default_value": "ddoauth_twin_00000000000000000000000001",
+        "confidence": "high",
+    },
     # Dropbox
     {
         "twin": "dropbox",
@@ -485,6 +567,22 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         'Seed files: "Quarterly Plan.txt", "Reports" (folder)',
         "Owner token: ya29.drive-twin-owner",
         "Editor token: ya29.drive-twin-editor",
+    ],
+    "google_sheets": [
+        "Sheets v4 API emulator ready",
+        "Supports spreadsheets, A1 values, batch updates, formulas, formatting, and developer metadata",
+        "Owner token: ya29.drive-twin-owner",
+    ],
+    "google_workspace": [
+        "People, Workspace Events, Apps Script, and Pub/Sub APIs ready",
+        "Supports contacts, event subscriptions, script projects/deployments/execution, topics, and subscriptions",
+        "Owner token: ya29.drive-twin-owner",
+    ],
+    "datadog": [
+        "Datadog REST and monitoring UI twin ready",
+        "Supports metrics, logs, events, monitors, dashboards, notebooks, incidents, SLOs, downtime, and synthetics",
+        "API key: ddapi_twin_0000000000000000000000000001",
+        "Application key: ddapp_twin_0000000000000000000000000001",
     ],
     "dropbox": [
         "Root folder initialized",
