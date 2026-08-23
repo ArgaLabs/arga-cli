@@ -3522,7 +3522,7 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument(
         "--twins",
         required=True,
-        help="Comma-separated twins, e.g. datadog,google_sheets,google_workspace,slack",
+        help="Comma-separated twins, e.g. datadog,google_drive,google_docs,google_sheets",
     )
     create_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
     create_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
@@ -3750,7 +3750,7 @@ def build_parser() -> argparse.ArgumentParser:
     twins_provision_parser.add_argument(
         "--twins",
         required=True,
-        help="Comma-separated twins, e.g. datadog,google_sheets,google_workspace,slack",
+        help="Comma-separated twins, e.g. datadog,google_drive,google_docs,google_sheets",
     )
     twins_provision_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
     twins_provision_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")

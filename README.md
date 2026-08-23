@@ -81,9 +81,8 @@ Provision twins directly:
 ```bash
 arga previews twins list
 arga twin-runs create --twins datadog --ttl 60 --wait
-arga twin-runs create --twins google_sheets --ttl 60 --wait
-arga twin-runs create --twins google_workspace --ttl 60 --wait
-arga twin-runs create --twins google_drive,google_sheets,google_workspace --ttl 60 --wait
+arga previews twins provision --twins salesforce,gitlab,linear,waterfall --ttl 60 --wait
+arga twin-runs create --twins google_drive,google_docs,google_sheets --ttl 60 --wait
 arga previews twins status <run_id>
 arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>
@@ -157,7 +156,8 @@ arga previews sandboxes teardown <sandbox_id>
 arga previews pr-checks run --repo arga-labs/validation-server --pr 182
 arga previews twins list
 arga twin-runs create --twins datadog --ttl 60 --wait
-arga twin-runs create --twins google_drive,google_sheets,google_workspace --ttl 60 --wait
+arga previews twins provision --twins slack,jira,linear,gitlab,salesforce,waterfall --ttl 60 --wait
+arga twin-runs create --twins google_drive,google_docs,google_sheets --ttl 60 --wait
 arga previews twins status <run_id>
 arga previews twins extend <run_id> --ttl 90
 arga previews twins lock <run_id>
@@ -175,7 +175,8 @@ arga previews pr-checks disable arga-labs/validation-server --trigger branch
 - `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
 - `arga previews twins list` shows the supported twin catalog from `validation-server`.
 - `arga previews twins provision` provisions twins without running a browser test. Use `--scenario-id` or `--scenario-prompt` to seed them, `--private` to keep them behind proxy auth, and `--candidate-safe` to expose only provider data-plane APIs on the public candidate host. Candidate-safe runs hide the twin root/UI, twin-hosted documentation and OpenAPI/schema discovery, and control-plane routes; trusted authenticated admin URLs remain available for seeding and verification.
-- Use the catalog names `datadog`, `google_drive`, `google_sheets`, and `google_workspace`. The Workspace twin contains People, Workspace Events, Apps Script, Pub/Sub, and helper task APIs; Sheets is a separate twin.
+- Google Drive, Google Docs, and Google Sheets are independent twins. Docs and Sheets each expose their provider-compatible API and an interactive editor UI. Provision all three when a `gws` workflow crosses service boundaries. Their preset Docs and Sheets resources use matching stable IDs, but mutations do not synchronize between twin processes.
+- The `datadog` twin provides stateful REST APIs and a monitoring UI for metrics, logs, events, monitors, dashboards, notebooks, incidents, SLOs, downtimes, and Synthetics.
 - `arga previews twins extend` / `lock` / `reset` / `teardown` adjust TTL, disable public access, reset seeded state, or end the quickstart session.
 - `arga previews pr-checks install/config/config-set/enabled/enable/disable` manage automatic PR check settings.
 
