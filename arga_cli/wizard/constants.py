@@ -189,20 +189,36 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         },
     },
     "google_sheets": {
-        "token_vars": ["GOOGLE_ACCESS_TOKEN", "GOOGLE_SHEETS_TOKEN", "GOOGLE_SHEETS_ACCESS_TOKEN"],
+        "token_vars": [
+            "GOOGLE_CLIENT_ID",
+            "GOOGLE_CLIENT_SECRET",
+            "GOOGLE_ACCESS_TOKEN",
+            "GOOGLE_SHEETS_TOKEN",
+            "GOOGLE_SHEETS_ACCESS_TOKEN",
+        ],
         "url_vars": ["GOOGLE_SHEETS_API_URL", "GOOGLE_SHEETS_BASE_URL"],
         "secret_vars": [],
         "defaults": {
+            "GOOGLE_CLIENT_ID": "google-twin-client-id",
+            "GOOGLE_CLIENT_SECRET": "google-twin-client-secret",
             "GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner",
             "GOOGLE_SHEETS_TOKEN": "ya29.drive-twin-owner",
             "GOOGLE_SHEETS_ACCESS_TOKEN": "ya29.drive-twin-owner",
         },
     },
     "google_workspace": {
-        "token_vars": ["GOOGLE_ACCESS_TOKEN", "GOOGLE_WORKSPACE_TOKEN", "GOOGLE_WORKSPACE_ACCESS_TOKEN"],
+        "token_vars": [
+            "GOOGLE_CLIENT_ID",
+            "GOOGLE_CLIENT_SECRET",
+            "GOOGLE_ACCESS_TOKEN",
+            "GOOGLE_WORKSPACE_TOKEN",
+            "GOOGLE_WORKSPACE_ACCESS_TOKEN",
+        ],
         "url_vars": ["GOOGLE_WORKSPACE_API_URL", "GOOGLE_WORKSPACE_BASE_URL"],
         "secret_vars": [],
         "defaults": {
+            "GOOGLE_CLIENT_ID": "google-twin-client-id",
+            "GOOGLE_CLIENT_SECRET": "google-twin-client-secret",
             "GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner",
             "GOOGLE_WORKSPACE_TOKEN": "ya29.drive-twin-owner",
             "GOOGLE_WORKSPACE_ACCESS_TOKEN": "ya29.drive-twin-owner",

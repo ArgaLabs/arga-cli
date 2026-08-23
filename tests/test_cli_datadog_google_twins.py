@@ -48,5 +48,7 @@ def test_google_sheets_and_workspace_are_separate_cli_choices() -> None:
         ],
         "show_in_ui": False,
     }
+    assert "GOOGLE_CLIENT_ID" in TWIN_ENV_MAPPINGS["google_sheets"]["token_vars"]
+    assert "GOOGLE_CLIENT_SECRET" in TWIN_ENV_MAPPINGS["google_workspace"]["token_vars"]
     assert "GOOGLE_SHEETS_API_URL" in TWIN_ENV_MAPPINGS["google_sheets"]["url_vars"]
     assert "GOOGLE_WORKSPACE_API_URL" in TWIN_ENV_MAPPINGS["google_workspace"]["url_vars"]
