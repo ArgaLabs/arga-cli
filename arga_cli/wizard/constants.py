@@ -37,6 +37,24 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["www.googleapis.com/drive/v3", "content.googleapis.com"],
         "show_in_ui": True,
     },
+    "google_docs": {
+        "label": "Google Docs",
+        "port": 12139,
+        "intercept_domains": ["docs.googleapis.com", "www.googleapis.com/discovery/v1/apis/docs/v1/rest"],
+        "show_in_ui": False,
+    },
+    "google_sheets": {
+        "label": "Google Sheets",
+        "port": 12137,
+        "intercept_domains": ["sheets.googleapis.com", "www.googleapis.com/discovery/v1/apis/sheets/v4/rest"],
+        "show_in_ui": False,
+    },
+    "google_workspace": {
+        "label": "Google Workspace",
+        "port": 12138,
+        "intercept_domains": ["people.googleapis.com", "workspaceevents.googleapis.com"],
+        "show_in_ui": False,
+    },
     "dropbox": {
         "label": "Dropbox",
         "port": 12119,
@@ -164,6 +182,24 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
             "GOOGLE_CLIENT_SECRET": "google-twin-client-secret",
             "GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner",
         },
+    },
+    "google_docs": {
+        "token_vars": ["GOOGLE_ACCESS_TOKEN", "GOOGLE_DOCS_TOKEN", "GOOGLE_DOCS_ACCESS_TOKEN"],
+        "url_vars": ["GOOGLE_DOCS_API_URL"],
+        "secret_vars": [],
+        "defaults": {"GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner"},
+    },
+    "google_sheets": {
+        "token_vars": ["GOOGLE_ACCESS_TOKEN", "GOOGLE_SHEETS_TOKEN", "GOOGLE_SHEETS_ACCESS_TOKEN"],
+        "url_vars": ["GOOGLE_SHEETS_API_URL"],
+        "secret_vars": [],
+        "defaults": {"GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner"},
+    },
+    "google_workspace": {
+        "token_vars": ["GOOGLE_ACCESS_TOKEN", "GOOGLE_WORKSPACE_TOKEN"],
+        "url_vars": ["GOOGLE_WORKSPACE_API_URL"],
+        "secret_vars": [],
+        "defaults": {"GOOGLE_ACCESS_TOKEN": "ya29.drive-twin-owner"},
     },
     "dropbox": {
         "token_vars": ["DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "DROPBOX_ACCESS_TOKEN", "DROPBOX_TOKEN"],
@@ -482,9 +518,23 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
     ],
     "google_drive": [
         "Principals: Drive Twin Owner, Drive Twin Editor",
-        'Seed files: "Quarterly Plan.txt", "Reports" (folder)',
+        'Preset metadata: "Launch notes" (Docs), "Launch plan" (Sheets)',
         "Owner token: ya29.drive-twin-owner",
         "Editor token: ya29.drive-twin-editor",
+    ],
+    "google_docs": [
+        "Google Docs v1 API emulator ready",
+        'Preset document: "Launch notes" (google-docs-launch-notes)',
+        "Access token: ya29.drive-twin-owner",
+    ],
+    "google_sheets": [
+        "Google Sheets v4 API emulator ready",
+        'Preset spreadsheet: "Launch plan" (google-sheets-launch-plan)',
+        "Access token: ya29.drive-twin-owner",
+    ],
+    "google_workspace": [
+        "People, Workspace Events, Apps Script, and Pub/Sub APIs ready",
+        "Access token: ya29.drive-twin-owner",
     ],
     "dropbox": [
         "Root folder initialized",

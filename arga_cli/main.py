@@ -3522,7 +3522,7 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument(
         "--twins",
         required=True,
-        help="Comma-separated twins, e.g. salesforce,gitlab,waterfall,slack",
+        help="Comma-separated twins, e.g. google_drive,google_docs,google_sheets",
     )
     create_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
     create_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
