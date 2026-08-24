@@ -104,9 +104,9 @@ def select_twins(max_twins: int | None = None) -> list[str]:
 
     # Team / Paid: multi-select
     all_choices = (
-        [questionary.Separator("── UI Twins (with interactive dashboard) ──")]
+        [questionary.Separator("── API + UI Twins (interactive browser interface) ──")]
         + ui_choices
-        + [questionary.Separator("── Backend-only Twins ──")]
+        + [questionary.Separator("── API-only Twins ──")]
         + backend_choices
     )
     selected = questionary.checkbox(
