@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from arga_cli import main
-from arga_cli.wizard import env
+from arga_cli.wizard import env, prompts
 from arga_cli.wizard.constants import QUICKSTART_SUMMARIES, TWIN_CATALOG, TWIN_ENV_MAPPINGS
 
 
@@ -66,3 +66,31 @@ def test_twin_run_parser_accepts_all_google_editor_twins() -> None:
     assert args.twins == "google_drive,google_docs,google_sheets"
     assert args.ttl == 60
     assert args.wait is True
+
+
+def test_wizard_groups_google_editors_under_api_and_ui(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Answer:
+        @staticmethod
+        def ask() -> list[str]:
+            return ["google_docs", "google_sheets"]
+
+    def fake_checkbox(message: str, *, choices: list[object], validate) -> Answer:
+        captured.update(message=message, choices=choices, validate=validate)
+        return Answer()
+
+    monkeypatch.setattr(prompts.questionary, "checkbox", fake_checkbox)
+
+    assert prompts.select_twins() == ["google_docs", "google_sheets"]
+
+    choices = captured["choices"]
+    assert isinstance(choices, list)
+    titles = [getattr(choice, "title", "") for choice in choices]
+    values = [getattr(choice, "value", None) for choice in choices]
+    api_only_index = titles.index("── API-only Twins ──")
+
+    assert titles[0] == "── API + UI Twins (interactive browser interface) ──"
+    assert values.index("google_docs") < api_only_index
+    assert values.index("google_sheets") < api_only_index
+    assert values.index("google_workspace") > api_only_index
