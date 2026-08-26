@@ -139,6 +139,84 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["api.waterfall.io"],
         "show_in_ui": False,
     },
+    "attio": {
+        "label": "Attio",
+        "port": 12130,
+        "intercept_domains": ["api.attio.com", "app.attio.com"],
+        "show_in_ui": True,
+    },
+    "resend": {
+        "label": "Resend",
+        "port": 12131,
+        "intercept_domains": ["api.resend.com", "resend.com"],
+        "show_in_ui": True,
+    },
+    "quickbooks": {
+        "label": "QuickBooks",
+        "port": 12132,
+        "intercept_domains": ["quickbooks.api.intuit.com", "oauth.platform.intuit.com"],
+        "show_in_ui": True,
+    },
+    "checkhq": {
+        "label": "Check",
+        "port": 12133,
+        "intercept_domains": ["sandbox.checkhq.com", "api.checkhq.com"],
+        "show_in_ui": True,
+    },
+    "trolley": {
+        "label": "Trolley",
+        "port": 12134,
+        "intercept_domains": ["api.trolley.com", "widget.trolley.com"],
+        "show_in_ui": True,
+    },
+    "documenso": {
+        "label": "Documenso",
+        "port": 12135,
+        "intercept_domains": ["app.documenso.com", "documenso.com"],
+        "show_in_ui": True,
+    },
+    "datadog": {
+        "label": "Datadog",
+        "port": 12136,
+        "intercept_domains": ["api.datadoghq.com", "http-intake.logs.datadoghq.com"],
+        "show_in_ui": True,
+    },
+    "calendly": {
+        "label": "Calendly",
+        "port": 12140,
+        "intercept_domains": ["api.calendly.com", "auth.calendly.com"],
+        "show_in_ui": True,
+    },
+    "slack_enterprise": {
+        "label": "Slack Enterprise Grid",
+        "port": 12141,
+        "intercept_domains": ["api.slack.com", "slack.com"],
+        "show_in_ui": False,
+    },
+    "workday": {
+        "label": "Workday",
+        "port": 12142,
+        "intercept_domains": ["api.workday.com", "api.us.wcp.workday.com"],
+        "show_in_ui": True,
+    },
+    "okta": {
+        "label": "Okta",
+        "port": 12143,
+        "intercept_domains": ["okta.com", "oktapreview.com", "okta-emea.com"],
+        "show_in_ui": False,
+    },
+    "hubspot": {
+        "label": "HubSpot",
+        "port": 12128,
+        "intercept_domains": ["api.hubapi.com", "api.hsforms.com", "app.hubspot.com"],
+        "show_in_ui": False,
+    },
+    "gmail": {
+        "label": "Gmail",
+        "port": 12123,
+        "intercept_domains": ["gmail.googleapis.com", "gmailmcp.googleapis.com"],
+        "show_in_ui": True,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -349,6 +427,128 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
         "url_vars": ["WATERFALL_API_BASE_URL", "WATERFALL_API_URL", "WATERFALL_BASE_URL"],
         "secret_vars": [],
         "defaults": {"WATERFALL_API_KEY": "ad18e456-0dd7-45e1-b094-43a0361aedfa"},
+    },
+    "attio": {
+        "token_vars": ["ATTIO_API_KEY", "ATTIO_ACCESS_TOKEN"],
+        "url_vars": ["ATTIO_API_URL", "ATTIO_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "ATTIO_API_KEY": "attio_test_00000000000000000000000000000000",
+            "ATTIO_ACCESS_TOKEN": "attio_test_00000000000000000000000000000000",
+        },
+    },
+    "resend": {
+        "token_vars": ["RESEND_API_KEY"],
+        "url_vars": ["RESEND_API_URL", "RESEND_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {"RESEND_API_KEY": "re_twin_full_access"},
+    },
+    "quickbooks": {
+        "token_vars": ["QUICKBOOKS_ACCESS_TOKEN", "QBO_ACCESS_TOKEN", "QUICKBOOKS_REALM_ID", "QBO_REALM_ID"],
+        "url_vars": ["QUICKBOOKS_API_BASE_URL", "QUICKBOOKS_BASE_URL", "QBO_BASE_URL"],
+        "secret_vars": ["QUICKBOOKS_CLIENT_SECRET", "QBO_CLIENT_SECRET"],
+        "defaults": {
+            "QUICKBOOKS_ACCESS_TOKEN": "qbo-twin-access-token",
+            "QBO_ACCESS_TOKEN": "qbo-twin-access-token",
+            "QUICKBOOKS_REALM_ID": "123146096291789",
+            "QBO_REALM_ID": "123146096291789",
+        },
+    },
+    "checkhq": {
+        "token_vars": ["CHECK_API_KEY", "CHECKHQ_API_KEY"],
+        "url_vars": ["CHECK_API_BASE_URL", "CHECKHQ_API_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "CHECK_API_KEY": "check_sandbox_00000000000000000000000000000000",
+            "CHECKHQ_API_KEY": "check_sandbox_00000000000000000000000000000000",
+        },
+    },
+    "trolley": {
+        "token_vars": ["TROLLEY_ACCESS_KEY"],
+        "url_vars": ["TROLLEY_API_URL", "TROLLEY_BASE_URL", "TROLLEY_WIDGET_URL"],
+        "secret_vars": ["TROLLEY_SECRET_KEY"],
+        "defaults": {
+            "TROLLEY_ACCESS_KEY": "test-access-key",
+            "TROLLEY_SECRET_KEY": "test-secret-key",
+        },
+    },
+    "documenso": {
+        "token_vars": ["DOCUMENSO_API_KEY"],
+        "url_vars": ["DOCUMENSO_BASE_URL", "DOCUMENSO_API_URL"],
+        "secret_vars": [],
+        "defaults": {"DOCUMENSO_API_KEY": "api_documenso_twin_full_access"},
+    },
+    "datadog": {
+        "token_vars": ["DD_API_KEY", "DATADOG_API_KEY", "DD_APP_KEY", "DATADOG_APP_KEY", "DD_ACCESS_TOKEN"],
+        "url_vars": ["DD_API_URL", "DATADOG_API_URL", "DD_BASE_URL", "DATADOG_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "DD_API_KEY": "ddapi_twin_0000000000000000000000000001",
+            "DATADOG_API_KEY": "ddapi_twin_0000000000000000000000000001",
+            "DD_APP_KEY": "ddapp_twin_0000000000000000000000000001",
+            "DATADOG_APP_KEY": "ddapp_twin_0000000000000000000000000001",
+            "DD_ACCESS_TOKEN": "ddoauth_twin_00000000000000000000000001",
+        },
+    },
+    "calendly": {
+        "token_vars": ["CALENDLY_ACCESS_TOKEN", "CALENDLY_API_TOKEN"],
+        "url_vars": ["CALENDLY_BASE_URL", "CALENDLY_API_BASE_URL", "CALENDLY_OAUTH_BASE_URL"],
+        "secret_vars": ["CALENDLY_CLIENT_SECRET"],
+        "defaults": {
+            "CALENDLY_ACCESS_TOKEN": "calendly_pat_twin_owner",
+            "CALENDLY_API_TOKEN": "calendly_pat_twin_owner",
+        },
+    },
+    "slack_enterprise": {
+        "token_vars": ["SLACK_ENTERPRISE_TOKEN", "SLACK_SCIM_TOKEN", "SLACK_AUDIT_LOGS_TOKEN"],
+        "url_vars": ["SLACK_ENTERPRISE_BASE_URL", "SLACK_SCIM_BASE_URL", "SLACK_AUDIT_LOGS_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "SLACK_ENTERPRISE_TOKEN": "xoxp-slack-enterprise-org-owner",
+            "SLACK_SCIM_TOKEN": "xoxp-slack-enterprise-scim",
+            "SLACK_AUDIT_LOGS_TOKEN": "xoxp-slack-enterprise-audit",
+        },
+    },
+    "workday": {
+        "token_vars": ["WORKDAY_ACCESS_TOKEN", "WORKDAY_REFRESH_TOKEN", "WORKDAY_CLIENT_ID", "WORKDAY_USERNAME"],
+        "url_vars": ["WORKDAY_REST_API_BASE_URL", "WORKDAY_API_BASE_URL", "WORKDAY_SOAP_API_BASE_URL"],
+        "secret_vars": ["WORKDAY_PASSWORD", "WORKDAY_CLIENT_SECRET"],
+        "defaults": {
+            "WORKDAY_ACCESS_TOKEN": "workday-twin-token",
+            "WORKDAY_REFRESH_TOKEN": "workday-twin-refresh-token",
+            "WORKDAY_CLIENT_ID": "workday-twin-client",
+            "WORKDAY_USERNAME": "isu_workday",
+            "WORKDAY_PASSWORD": "workday-twin-password",
+            "WORKDAY_CLIENT_SECRET": "workday-twin-secret",
+        },
+    },
+    "okta": {
+        "token_vars": ["OKTA_API_TOKEN", "OKTA_ACCESS_TOKEN", "OKTA_OAUTH_ACCESS_TOKEN", "OKTA_CLIENT_TOKEN"],
+        "url_vars": ["OKTA_ORG_URL", "OKTA_DOMAIN", "OKTA_CLIENT_ORGURL"],
+        "secret_vars": ["OKTA_CLIENT_SECRET"],
+        "defaults": {
+            "OKTA_API_TOKEN": "00okta_twin_api_token",
+            "OKTA_ACCESS_TOKEN": "00okta_twin_api_token",
+            "OKTA_OAUTH_ACCESS_TOKEN": "okta-twin-oauth-token",
+            "OKTA_CLIENT_TOKEN": "00okta_twin_api_token",
+        },
+    },
+    "hubspot": {
+        "token_vars": ["HUBSPOT_ACCESS_TOKEN", "HUBSPOT_API_KEY", "HUBSPOT_DEVELOPER_API_KEY"],
+        "url_vars": ["HUBSPOT_API_URL", "HUBSPOT_BASE_URL"],
+        "secret_vars": ["HUBSPOT_CLIENT_SECRET"],
+        "defaults": {
+            "HUBSPOT_DEVELOPER_API_KEY": "hubspot-twin-developer-key",
+        },
+    },
+    "gmail": {
+        "token_vars": ["GMAIL_ACCESS_TOKEN", "GMAIL_TOKEN", "GOOGLE_ACCESS_TOKEN"],
+        "url_vars": ["GMAIL_API_URL", "GMAIL_BASE_URL"],
+        "secret_vars": [],
+        "defaults": {
+            "GMAIL_ACCESS_TOKEN": "ya29.gmail-twin-owner",
+            "GOOGLE_ACCESS_TOKEN": "ya29.gmail-twin-owner",
+        },
     },
 }
 
@@ -608,5 +808,61 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
         "Starts empty by default",
         "Supports company search, people search, enrichment, verification, and account endpoints",
         "API key: ad18e456-0dd7-45e1-b094-43a0361aedfa",
+    ],
+    "attio": [
+        "Attio CRM API and workspace UI ready",
+        "Supports records, objects, lists, notes, tasks, comments, and webhooks",
+        "Access token: attio_test_00000000000000000000000000000000",
+    ],
+    "resend": [
+        "Resend email API and dashboard ready",
+        "API key: re_twin_full_access",
+    ],
+    "quickbooks": [
+        "QuickBooks Online API and company UI ready",
+        "Realm ID: 123146096291789",
+        "Access token: qbo-twin-access-token",
+    ],
+    "checkhq": [
+        "Check payroll API and dashboard ready",
+        "API key: check_sandbox_00000000000000000000000000000000",
+    ],
+    "trolley": [
+        "Trolley payments API and dashboard ready",
+        "Access key: test-access-key",
+    ],
+    "documenso": [
+        "Documenso signing API and document UI ready",
+        "API key: api_documenso_twin_full_access",
+    ],
+    "datadog": [
+        "Datadog API, log intake, metrics, monitors, and dashboard UI ready",
+        "API key: ddapi_twin_0000000000000000000000000001",
+        "App key: ddapp_twin_0000000000000000000000000001",
+    ],
+    "calendly": [
+        "Calendly scheduling API and booking UI ready",
+        "Access token: calendly_pat_twin_owner",
+    ],
+    "slack_enterprise": [
+        "Slack Enterprise Grid Admin, SCIM, and Audit Logs APIs ready",
+        "Org owner token: xoxp-slack-enterprise-org-owner",
+    ],
+    "workday": [
+        "Workday REST and SOAP APIs plus workforce UI ready",
+        "Tenant: gms",
+        "Access token: workday-twin-token",
+    ],
+    "okta": [
+        "Okta management and OAuth APIs ready",
+        "API token: 00okta_twin_api_token",
+    ],
+    "hubspot": [
+        "HubSpot CRM and forms APIs ready",
+        "The provisioned access token is shown with the twin connection details",
+    ],
+    "gmail": [
+        "Gmail v1 API and inbox UI ready",
+        "Owner token: ya29.gmail-twin-owner",
     ],
 }

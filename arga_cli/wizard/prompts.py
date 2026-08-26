@@ -78,16 +78,25 @@ def prompt_api_key(api_url: str, flag_api_key: str | None = None) -> str | None:
     return trimmed
 
 
-def select_twins(max_twins: int | None = None) -> list[str]:
-    """Show twin selection prompt, adapted to the user's plan."""
+def select_twins(max_twins: int | None = None, catalog: list[dict] | None = None) -> list[str]:
+    """Show the server-supported twin selection prompt, adapted to the user's plan."""
     ui_choices = []
     backend_choices = []
 
-    for name, meta in TWIN_CATALOG.items():
-        domains = ", ".join(meta["intercept_domains"][:2])
-        label = f"{meta['label']:<18} {domains}"
+    catalog_items = catalog or [{"name": name, **meta} for name, meta in TWIN_CATALOG.items()]
+
+    for item in catalog_items:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        local_meta = TWIN_CATALOG.get(name, {})
+        label_text = str(item.get("label") or local_meta.get("label") or name.replace("_", " ").title())
+        domains = ", ".join(local_meta.get("intercept_domains", [])[:2])
+        label = f"{label_text:<22} {domains}".rstrip()
         choice = questionary.Choice(title=label, value=name)
-        if meta["show_in_ui"]:
+        kind = item.get("kind")
+        has_ui = kind == "frontend" if kind else bool(local_meta.get("show_in_ui", True))
+        if has_ui:
             ui_choices.append(choice)
         else:
             backend_choices.append(choice)
