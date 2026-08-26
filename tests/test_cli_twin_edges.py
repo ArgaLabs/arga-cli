@@ -201,7 +201,10 @@ def test_api_client_resets_twins_via_supported_validation_endpoint(monkeypatch) 
     assert result["status"] == "reset_complete"
     assert captured == {
         "url": "https://api.argalabs.com/validate/twins/provision/run_reset/reset",
-        "headers": {"Authorization": "Bearer arga_api_key"},
+        "headers": {
+            "Authorization": "Bearer arga_api_key",
+            main.ARGA_CLI_VERSION_HEADER: main._cli_version(),
+        },
     }
 
 
