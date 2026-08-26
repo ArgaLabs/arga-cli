@@ -47,8 +47,16 @@ def run_wizard(
     except Exception:
         pass  # Non-fatal — fall back to unlimited behavior
 
+    # The server catalog is authoritative. The bundled catalog remains an
+    # offline fallback and supplies env-var metadata for known twins.
+    available_twins = None
+    try:
+        available_twins = client.list_twins()
+    except Exception:
+        pass
+
     # Step 2: Twin selection (plan-aware)
-    selected = select_twins(max_twins)
+    selected = select_twins(max_twins, catalog=available_twins)
     if not selected:
         return 1
 
