@@ -266,7 +266,10 @@ def test_scenario_delete_uses_supported_route_and_cli_output(monkeypatch, capsys
 
     assert captured == {
         "url": "https://api.argalabs.com/scenarios/scenario_123",
-        "headers": {"Authorization": "Bearer arga_api_key"},
+        "headers": {
+            "Authorization": "Bearer arga_api_key",
+            main.ARGA_CLI_VERSION_HEADER: main._cli_version(),
+        },
     }
 
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")

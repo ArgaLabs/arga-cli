@@ -21,6 +21,7 @@ import httpx
 from arga_cli.mcp import install_mcp_configuration
 
 DEFAULT_API_URL = os.environ.get("ARGA_API_URL", "https://api.argalabs.com")
+ARGA_CLI_VERSION_HEADER = "X-Arga-CLI-Version"
 CONFIG_PATH = Path.home() / ".config" / "arga" / "config.json"
 WIZARD_SESSION_FILE = ".arga-session.json"
 WIZARD_SESSION_PATH = Path(WIZARD_SESSION_FILE)
@@ -43,38 +44,101 @@ VERSION_CHECK_PATH = Path.home() / ".config" / "arga" / "version_check.json"
 VERSION_CHECK_TTL_SECONDS = 86400  # 24 hours
 
 
-def _check_for_update() -> None:
-    """Print a warning if a newer version is available on PyPI. Caches for 24h."""
+def _version_tuple(value: str | None) -> tuple[int, int, int] | None:
+    if not value:
+        return None
+    core = value.partition("-")[0].partition("+")[0]
+    try:
+        parts = tuple(int(part) for part in core.split("."))
+    except ValueError:
+        return None
+    if len(parts) != 3:
+        return None
+    return parts
+
+
+def _version_is_older(current: str | None, target: str | None) -> bool:
+    current_tuple = _version_tuple(current)
+    target_tuple = _version_tuple(target)
+    return current_tuple is not None and target_tuple is not None and current_tuple < target_tuple
+
+
+def _check_for_update(api_url: str = DEFAULT_API_URL) -> bool:
+    """Check the server's CLI policy before opening the wizard.
+
+    Returns False when the installed version is below the server's minimum.
+    Network and metadata failures fail open so they never block offline use.
+    """
     try:
         current = _cli_version()
         if current == "unknown":
-            return
+            return True
 
         now = time.time()
-        cached_latest: str | None = None
+        normalized_api_url = api_url.rstrip("/")
+        version_info: dict[str, Any] | None = None
         if VERSION_CHECK_PATH.exists():
             data = json.loads(VERSION_CHECK_PATH.read_text())
-            if now - data.get("checked_at", 0) < VERSION_CHECK_TTL_SECONDS:
-                cached_latest = data.get("latest")
+            cache_matches = (
+                data.get("api_url") == normalized_api_url
+                and data.get("current_version") == current
+                and now - data.get("checked_at", 0) < VERSION_CHECK_TTL_SECONDS
+            )
+            if cache_matches:
+                version_info = data
 
-        if cached_latest is None:
-            resp = httpx.get("https://pypi.org/pypi/arga-cli/json", timeout=3.0)
-            resp.raise_for_status()
-            cached_latest = resp.json()["info"]["version"]
-            VERSION_CHECK_PATH.parent.mkdir(parents=True, exist_ok=True)
-            VERSION_CHECK_PATH.write_text(json.dumps({"latest": cached_latest, "checked_at": now}))
-
-        if cached_latest and cached_latest != current:
-            latest_parts = tuple(int(x) for x in cached_latest.split("."))
-            current_parts = tuple(int(x) for x in current.split("."))
-            if latest_parts > current_parts:
-                print(
-                    f"\033[33mwarning: arga-cli {cached_latest} available (you have {current}). "
-                    f"Update with: uv tool upgrade arga-cli\033[0m",
-                    file=sys.stderr,
+        if version_info is None:
+            try:
+                response = httpx.get(
+                    f"{normalized_api_url}/client-versions/arga-cli",
+                    headers={ARGA_CLI_VERSION_HEADER: current},
+                    timeout=3.0,
                 )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Unexpected client-version response")
+                version_info = dict(payload)
+            except (httpx.HTTPError, KeyError, TypeError, ValueError):
+                response = httpx.get("https://pypi.org/pypi/arga-cli/json", timeout=3.0)
+                response.raise_for_status()
+                version_info = {
+                    "latest_version": response.json()["info"]["version"],
+                    "minimum_version": None,
+                    "upgrade_command": "uv tool upgrade arga-cli",
+                }
+
+            version_info.update(
+                {
+                    "api_url": normalized_api_url,
+                    "current_version": current,
+                    "checked_at": now,
+                }
+            )
+            VERSION_CHECK_PATH.parent.mkdir(parents=True, exist_ok=True)
+            VERSION_CHECK_PATH.write_text(json.dumps(version_info))
+
+        latest = version_info.get("latest_version") or version_info.get("latest")
+        minimum = version_info.get("minimum_version")
+        upgrade_command = version_info.get("upgrade_command") or "uv tool upgrade arga-cli"
+
+        if _version_is_older(current, minimum):
+            message = version_info.get("message") or (
+                f"Arga CLI update required.\n\nRun:\n  {upgrade_command}\n\n"
+                f"Then restart:\n  arga wizard\n\nMinimum supported version: {minimum}"
+            )
+            print(f"\033[31m{message}\033[0m", file=sys.stderr)
+            return False
+
+        if _version_is_older(current, latest):
+            print(
+                f"\033[33mwarning: arga-cli {latest} available (you have {current}). "
+                f"Update with: {upgrade_command}\033[0m",
+                file=sys.stderr,
+            )
     except Exception:
-        pass
+        return True
+    return True
 
 
 class CliError(Exception):
@@ -789,7 +853,11 @@ class ApiClient:
     def _auth_headers(self) -> dict[str, str]:
         if not self._api_key:
             raise NotAuthenticatedError("Error: Not authenticated. Run `arga login`.")
-        return {"Authorization": f"Bearer {self._api_key}"}
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        current_version = _cli_version()
+        if current_version != "unknown":
+            headers[ARGA_CLI_VERSION_HEADER] = current_version
+        return headers
 
     @staticmethod
     def _parse_json(response: httpx.Response, fallback: str) -> dict[str, str]:
@@ -3079,6 +3147,9 @@ def run_wizard_init(args: argparse.Namespace) -> int:
     """Run the full quickstart wizard natively."""
     from arga_cli.wizard import run_wizard
 
+    if not _check_for_update(args.api_url):
+        return 1
+
     try:
         api_key = load_api_key()
     except (NotAuthenticatedError, CliError):
@@ -3943,7 +4014,6 @@ def main() -> None:
     except httpx.HTTPError as exc:
         print(f"Network error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
-    _check_for_update()
     raise SystemExit(exit_code)
 
 
