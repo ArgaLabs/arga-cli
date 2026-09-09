@@ -481,7 +481,7 @@ class ApiClient:
         if scenario_id:
             payload["scenario_id"] = scenario_id
         payload["public"] = public
-        if scenario_generation_mode is not None:
+        if scenario_generation_mode is not None and scenario_prompt and not scenario_id:
             payload["scenario_generation_mode"] = scenario_generation_mode
         if access_profile != "full":
             payload["access_profile"] = access_profile
@@ -1609,7 +1609,11 @@ def run_twins_provision(args: argparse.Namespace) -> int:
             "scenario_id": getattr(args, "scenario_id", None),
             "public": not getattr(args, "private", False),
         }
-        if getattr(args, "generation_mode", None) is not None:
+        if (
+            getattr(args, "generation_mode", None) is not None
+            and provision_kwargs["scenario_prompt"]
+            and not provision_kwargs["scenario_id"]
+        ):
             provision_kwargs["scenario_generation_mode"] = args.generation_mode
         if getattr(args, "candidate_safe", False):
             provision_kwargs["access_profile"] = "candidate_api_only"

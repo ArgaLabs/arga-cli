@@ -91,3 +91,21 @@ def test_invalid_mode_is_rejected_before_request(requests, argv):
         main.build_parser().parse_args([*argv, "--generation-mode", "unknown"])
     assert exc.value.code == 2
     assert not requests
+
+
+@pytest.mark.parametrize("prefix", [["twin-runs", "create"], ["previews", "twins", "provision"]])
+@pytest.mark.parametrize(
+    "scenario_args",
+    [
+        [],
+        ["--scenario-prompt", ""],
+        ["--scenario-id", "saved-1"],
+        ["--scenario-id", "saved-1", "--scenario-prompt", "Ignored prompt"],
+    ],
+)
+def test_twin_run_omits_mode_when_not_generating(requests, prefix, scenario_args):
+    args = main.build_parser().parse_args(
+        [*prefix, "--twins", "slack", *scenario_args, "--generation-mode", "thorough", "--json"]
+    )
+    assert args.func(args) == 0
+    assert "scenario_generation_mode" not in json.loads(requests[0].content)
