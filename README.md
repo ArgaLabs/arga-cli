@@ -145,6 +145,40 @@ arga logout
 - `arga whoami` verifies the saved API key and prints the GitHub login plus workspace.
 - `arga logout` removes the local credential and attempts to revoke the current device on the server.
 
+### Choose a generation mode
+
+Use `--generation-mode thorough` for complex prompt requirements when a longer wait is acceptable. Omit the flag for **Fast** generation, or pass `--generation-mode fast` explicitly.
+
+```bash
+arga scenarios create \
+  --name "Support escalation" \
+  --prompt "A Slack support channel with linked escalation threads and consistent message authors" \
+  --twin slack \
+  --generation-mode thorough \
+  --json
+
+arga twin-runs create \
+  --twins slack \
+  --scenario-prompt "A support channel with linked escalation threads and consistent message authors" \
+  --generation-mode thorough \
+  --wait --json
+```
+
+Scenario `import` and `update` also accept the flag. It overrides `generation_mode` in the JSON file; without the flag, the file's value is preserved. To regenerate a saved scenario, provide `prompt` in the update file and omit `seed_config`:
+
+```json
+{
+  "prompt": "A Slack support channel with linked escalation threads and consistent message authors",
+  "generation_mode": "thorough"
+}
+```
+
+```bash
+arga scenarios update <scenario-id> --file scenario-update.json --json
+```
+
+The mode applies only to new prompt generation. Saved scenario IDs and explicit seed JSON reuse their existing data. The compatibility commands `arga test-runner scenarios ...` and `arga previews twins provision` accept the same flag.
+
 ### Previews
 
 ```bash

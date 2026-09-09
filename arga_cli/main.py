@@ -285,6 +285,7 @@ class ApiClient:
         twins: list[str] | None = None,
         seed_config: dict[str, Any] | None = None,
         tags: list[str] | None = None,
+        generation_mode: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"name": name}
         if prompt is not None:
@@ -297,6 +298,8 @@ class ApiClient:
             payload["seed_config"] = seed_config
         if tags:
             payload["tags"] = tags
+        if generation_mode is not None:
+            payload["generation_mode"] = generation_mode
         response = self._client.post(
             f"{self._api_url}/scenarios",
             json=payload,
@@ -470,6 +473,7 @@ class ApiClient:
         scenario_id: str | None = None,
         public: bool = True,
         access_profile: str = "full",
+        scenario_generation_mode: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"twins": twins, "ttl_minutes": ttl_minutes, "scenario": "quickstart"}
         if scenario_prompt:
@@ -477,6 +481,8 @@ class ApiClient:
         if scenario_id:
             payload["scenario_id"] = scenario_id
         payload["public"] = public
+        if scenario_generation_mode is not None and scenario_prompt and not scenario_id:
+            payload["scenario_generation_mode"] = scenario_generation_mode
         if access_profile != "full":
             payload["access_profile"] = access_profile
         response = self._client.post(
@@ -1603,6 +1609,12 @@ def run_twins_provision(args: argparse.Namespace) -> int:
             "scenario_id": getattr(args, "scenario_id", None),
             "public": not getattr(args, "private", False),
         }
+        if (
+            getattr(args, "generation_mode", None) is not None
+            and provision_kwargs["scenario_prompt"]
+            and not provision_kwargs["scenario_id"]
+        ):
+            provision_kwargs["scenario_generation_mode"] = args.generation_mode
         if getattr(args, "candidate_safe", False):
             provision_kwargs["access_profile"] = "candidate_api_only"
         status = client.provision_twins_start(**provision_kwargs)
@@ -1867,6 +1879,7 @@ def run_scenarios_create(args: argparse.Namespace) -> int:
             twins=getattr(args, "twin", None),
             seed_config=None,
             tags=getattr(args, "tag", None),
+            generation_mode=getattr(args, "generation_mode", None),
         )
     finally:
         client.close()
@@ -1909,6 +1922,7 @@ def run_scenarios_import(args: argparse.Namespace) -> int:
             twins=payload.get("twins"),
             seed_config=payload.get("seed_config"),
             tags=payload.get("tags"),
+            generation_mode=getattr(args, "generation_mode", None) or payload.get("generation_mode"),
         )
     finally:
         client.close()
@@ -1939,6 +1953,8 @@ def run_scenarios_update(args: argparse.Namespace) -> int:
     payload.pop("created_at", None)
     payload.pop("updated_at", None)
     payload.pop("is_preset", None)
+    if getattr(args, "generation_mode", None) is not None:
+        payload["generation_mode"] = args.generation_mode
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
@@ -3363,6 +3379,18 @@ def _add_url_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
 
 
+def _add_generation_mode_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--generation-mode",
+        choices=("fast", "thorough"),
+        default=None,
+        help=(
+            "Prompt generation: fast for everyday scenarios (default), thorough for complex requirements "
+            "with a longer wait. Overrides the mode in JSON; has no effect when reusing seed data."
+        ),
+    )
+
+
 def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_alias: bool = False) -> None:
     scenarios_list_parser = subparsers.add_parser("list", help="List your scenarios")
     scenarios_list_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -3392,12 +3420,14 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_create_parser.add_argument("--twin", action="append", default=None, help="Restrict to a twin (repeatable)")
     scenarios_create_parser.add_argument("--tag", action="append", default=None, help="Tag the scenario (repeatable)")
     scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    _add_generation_mode_argument(scenarios_create_parser)
     scenarios_create_parser.set_defaults(func=run_scenarios_create, deprecated_alias=deprecated_alias)
 
     scenarios_import_parser = subparsers.add_parser("import", help="Import a scenario JSON file")
     scenarios_import_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
     scenarios_import_parser.add_argument("--file", required=True, help="Scenario JSON file")
     scenarios_import_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    _add_generation_mode_argument(scenarios_import_parser)
     scenarios_import_parser.set_defaults(func=run_scenarios_import)
 
     scenarios_export_parser = subparsers.add_parser("export", help="Export a scenario JSON file")
@@ -3411,6 +3441,7 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_update_parser.add_argument("scenario_id", help="Scenario ID")
     scenarios_update_parser.add_argument("--file", required=True, help="Scenario JSON file")
     scenarios_update_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    _add_generation_mode_argument(scenarios_update_parser)
     scenarios_update_parser.set_defaults(func=run_scenarios_update)
 
     scenarios_delete_parser = subparsers.add_parser("delete", help="Delete a scenario")
@@ -3613,6 +3644,7 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
     create_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
     create_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    _add_generation_mode_argument(create_parser)
     create_parser.set_defaults(func=run_twins_provision)
 
     status_parser = subparsers.add_parser("status", help="Show twin run status")
@@ -3841,6 +3873,7 @@ def build_parser() -> argparse.ArgumentParser:
     twins_provision_parser.add_argument("--wait", action="store_true", default=False, help="Wait until twins are ready")
     twins_provision_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
     twins_provision_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
+    _add_generation_mode_argument(twins_provision_parser)
     twins_provision_parser.set_defaults(func=run_twins_provision)
     twins_status_parser = twins_subparsers.add_parser("status", help="Show twin provisioning status")
     twins_status_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")

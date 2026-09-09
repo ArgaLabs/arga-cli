@@ -292,6 +292,7 @@ def test_scenario_import_and_export_round_trip_payloads(monkeypatch, tmp_path, c
         "twins": ["slack", "jira"],
         "seed_config": {"slack": {"channels": [{"name": "support"}]}},
         "tags": ["smoke"],
+        "generation_mode": None,
     }
 
     monkeypatch.setattr(
