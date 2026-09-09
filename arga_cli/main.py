@@ -3382,7 +3382,7 @@ def _add_generation_mode_argument(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Prompt generation: fast for everyday scenarios (default), thorough for complex requirements "
-            "with a longer wait. Ignored for saved scenarios or explicit seed config; overrides the mode in JSON."
+            "with a longer wait. Overrides the mode in JSON; has no effect when reusing seed data."
         ),
     )
 
