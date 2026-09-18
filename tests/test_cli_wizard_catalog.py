@@ -23,6 +23,7 @@ EXPECTED_TWINS = {
     "google_workspace",
     "hubspot",
     "jira",
+    "kandji",
     "linear",
     "linkedin",
     "notion",

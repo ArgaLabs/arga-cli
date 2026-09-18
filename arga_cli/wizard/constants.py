@@ -217,6 +217,17 @@ TWIN_CATALOG: dict[str, dict] = {
         "intercept_domains": ["gmail.googleapis.com", "gmailmcp.googleapis.com"],
         "show_in_ui": True,
     },
+    "kandji": {
+        "label": "Iru (Kandji)",
+        "port": 12147,
+        "intercept_domains": [
+            "twin.api.iru.com",
+            "twin.api.eu.iru.com",
+            "twin.api.kandji.io",
+            "twin.api.eu.kandji.io",
+        ],
+        "show_in_ui": True,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -550,6 +561,36 @@ TWIN_ENV_MAPPINGS: dict[str, dict] = {
             "GOOGLE_ACCESS_TOKEN": "ya29.gmail-twin-owner",
         },
     },
+    "kandji": {
+        "token_vars": [
+            "IRU_API_TOKEN",
+            "IRUCTL_TOKEN",
+            "IRUPKG_TOKEN",
+            "IOTA_TOKEN",
+            "KST_TOKEN",
+            "KANDJI_TOKEN",
+            "KANDJI_API_TOKEN",
+        ],
+        "url_vars": [
+            "IRU_API_URL",
+            "IRU_API_BASE_URL",
+            "IRUCTL_TENANT",
+            "KST_TENANT",
+            "KANDJI_API_URL",
+            "KANDJI_API_BASE_URL",
+            "KANDJI_TWIN_BASE_URL",
+        ],
+        "secret_vars": [],
+        "defaults": {
+            "IRU_API_TOKEN": "00000000-0000-4000-8000-000000000001",
+            "IRUCTL_TOKEN": "00000000-0000-4000-8000-000000000001",
+            "IRUPKG_TOKEN": "00000000-0000-4000-8000-000000000001",
+            "IOTA_TOKEN": "00000000-0000-4000-8000-000000000001",
+            "KST_TOKEN": "00000000-0000-4000-8000-000000000001",
+            "KANDJI_TOKEN": "00000000-0000-4000-8000-000000000001",
+            "KANDJI_API_TOKEN": "00000000-0000-4000-8000-000000000001",
+        },
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -695,6 +736,8 @@ TOKEN_SHAPES: list[dict] = [
         "default_value": "ad18e456-0dd7-45e1-b094-43a0361aedfa",
         "confidence": "medium",
     },
+    # Iru/Kandji bearer tokens are UUID-like. UUIDs are too generic for safe
+    # value-only detection, so these credentials are matched by env var name.
 ]
 
 # ---------------------------------------------------------------------------
@@ -864,5 +907,12 @@ QUICKSTART_SUMMARIES: dict[str, list[str]] = {
     "gmail": [
         "Gmail v1 API and inbox UI ready",
         "Owner token: ya29.gmail-twin-owner",
+    ],
+    "kandji": [
+        'Tenant: "Iru (Kandji) Twin"',
+        "Iru API URL: https://twin.api.iru.com",
+        "Kandji API URL: https://twin.api.kandji.io",
+        "Resources: devices, users, Blueprints, Library items, tags, threats, and vulnerabilities",
+        "Token: 00000000-0000-4000-8000-000000000001",
     ],
 }
