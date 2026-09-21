@@ -1247,7 +1247,7 @@ def _print_test_config_summary(config: dict[str, Any]) -> None:
 
 def _print_twin_env_vars(status: dict) -> None:
     """Print twin URLs and env vars so the user can configure their app."""
-    from arga_cli.wizard.provision import with_proxy_token
+    from arga_cli.wizard.provision import callable_twin_base_url
 
     proxy_token = status.get("proxy_token")
     # Public `pub-` hosts don't do proxy auth, so the base_url is directly
@@ -1258,9 +1258,7 @@ def _print_twin_env_vars(status: dict) -> None:
     print("\nTwin environment variables — update your app's config to point at these:\n")
     for name, info in status.get("twins", {}).items():
         label = info.get("label", name)
-        base_url = info.get("base_url", "")
-        if not is_public and proxy_token and base_url:
-            base_url = with_proxy_token(base_url, proxy_token)
+        base_url = callable_twin_base_url(info, proxy_token=proxy_token, is_public=is_public)
         print(f"  {label}:")
         print(f"    Base URL: {base_url}")
         env_vars = info.get("env_vars", {})
@@ -3195,7 +3193,7 @@ def run_wizard_init(args: argparse.Namespace) -> int:
 def run_wizard_status(_args: argparse.Namespace) -> int:
     from arga_cli.wizard.constants import TWIN_CATALOG
     from arga_cli.wizard.output import print_summary_box
-    from arga_cli.wizard.provision import with_proxy_token
+    from arga_cli.wizard.provision import callable_twin_base_url
     from arga_cli.wizard.session import load_session
 
     session = load_session(os.getcwd())
@@ -3223,8 +3221,7 @@ def run_wizard_status(_args: argparse.Namespace) -> int:
     proxy_token = status.get("proxy_token")
     for name, info in status.get("twins", {}).items():
         label = TWIN_CATALOG.get(name, {}).get("label", name).ljust(16)
-        base_url = info.get("base_url", "")
-        url = base_url if is_public else with_proxy_token(base_url, proxy_token)
+        url = callable_twin_base_url(info, proxy_token=proxy_token, is_public=is_public)
         lines.append(f"{label} [underline]{url}[/underline]")
     if status.get("expires_at"):
         lines.append("")
@@ -3651,7 +3648,7 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
         help="Explicitly allow unauthenticated provider API access for this twin run",
     )
     create_access.add_argument("--private", action="store_false", dest="public", help=argparse.SUPPRESS)
-    create_parser.add_argument(
+    create_access.add_argument(
         "--candidate-safe",
         action="store_true",
         default=False,
@@ -3884,7 +3881,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicitly allow unauthenticated provider API access for this twin run",
     )
     provision_access.add_argument("--private", action="store_false", dest="public", help=argparse.SUPPRESS)
-    twins_provision_parser.add_argument(
+    provision_access.add_argument(
         "--candidate-safe",
         action="store_true",
         default=False,

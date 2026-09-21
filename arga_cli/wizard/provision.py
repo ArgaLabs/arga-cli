@@ -26,6 +26,14 @@ def with_proxy_token(url: str, proxy_token: str | None) -> str:
         return f"{url}{separator}token={proxy_token}"
 
 
+def callable_twin_base_url(info: dict, *, proxy_token: str | None, is_public: bool) -> str:
+    """Return a callable URL for current and legacy server responses."""
+    base_url = info.get("base_url", "")
+    if is_public or info.get("access_mode") == "capability":
+        return base_url
+    return with_proxy_token(base_url, proxy_token)
+
+
 def provision_twins(
     client: Any,
     twins: list[str],
