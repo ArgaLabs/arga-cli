@@ -471,7 +471,7 @@ class ApiClient:
         ttl_minutes: int,
         scenario_prompt: str | None = None,
         scenario_id: str | None = None,
-        public: bool = True,
+        public: bool = False,
         access_profile: str = "full",
         scenario_generation_mode: str | None = None,
     ) -> dict[str, Any]:
@@ -1247,7 +1247,7 @@ def _print_test_config_summary(config: dict[str, Any]) -> None:
 
 def _print_twin_env_vars(status: dict) -> None:
     """Print twin URLs and env vars so the user can configure their app."""
-    from arga_cli.wizard.provision import with_proxy_token
+    from arga_cli.wizard.provision import callable_twin_base_url
 
     proxy_token = status.get("proxy_token")
     # Public `pub-` hosts don't do proxy auth, so the base_url is directly
@@ -1258,9 +1258,7 @@ def _print_twin_env_vars(status: dict) -> None:
     print("\nTwin environment variables — update your app's config to point at these:\n")
     for name, info in status.get("twins", {}).items():
         label = info.get("label", name)
-        base_url = info.get("base_url", "")
-        if not is_public and proxy_token and base_url:
-            base_url = with_proxy_token(base_url, proxy_token)
+        base_url = callable_twin_base_url(info, proxy_token=proxy_token, is_public=is_public)
         print(f"  {label}:")
         print(f"    Base URL: {base_url}")
         env_vars = info.get("env_vars", {})
@@ -1393,9 +1391,7 @@ def run_test_url(args: argparse.Namespace) -> int:
                     raise CliError("A URL is required to start the test run.")
                 print()
             elif url:
-                print(
-                    "Deploy your app with the environment variables above, then press Enter to start the test run."
-                )
+                print("Deploy your app with the environment variables above, then press Enter to start the test run.")
                 print("Press Ctrl+C to cancel.\n")
                 try:
                     input()
@@ -1462,10 +1458,21 @@ def run_validate_pr(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
-        if any(
-            getattr(args, name, None)
-            for name in ("branch", "pr_url", "frontend_url", "scenario_prompt", "scenario_id", "twins", "session_id")
-        ) or getattr(args, "run_type", "pr_run") != "pr_run":
+        if (
+            any(
+                getattr(args, name, None)
+                for name in (
+                    "branch",
+                    "pr_url",
+                    "frontend_url",
+                    "scenario_prompt",
+                    "scenario_id",
+                    "twins",
+                    "session_id",
+                )
+            )
+            or getattr(args, "run_type", "pr_run") != "pr_run"
+        ):
             payload = client.start_pr_run(
                 repo=args.repo,
                 branch=getattr(args, "branch", None),
@@ -1607,7 +1614,7 @@ def run_twins_provision(args: argparse.Namespace) -> int:
             "ttl_minutes": ttl_minutes or 30,
             "scenario_prompt": getattr(args, "scenario_prompt", None),
             "scenario_id": getattr(args, "scenario_id", None),
-            "public": not getattr(args, "private", False),
+            "public": bool(getattr(args, "public", False) or getattr(args, "candidate_safe", False)),
         }
         if (
             getattr(args, "generation_mode", None) is not None
@@ -2050,6 +2057,7 @@ def _build_validate_config_set_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
     parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
     return parser
+
 
 def _bool_label(value: bool) -> str:
     return "yes" if value else "no"
@@ -2713,7 +2721,9 @@ def _test_payload_from_file(path: str) -> dict[str, Any]:
     if "test_config_json" in payload and "test_config" not in payload:
         payload["test_config"] = payload.pop("test_config_json")
     if "test_config" in payload:
-        config = _normalized_test_config(_extract_test_config(payload["test_config"] if isinstance(payload["test_config"], dict) else payload))
+        config = _normalized_test_config(
+            _extract_test_config(payload["test_config"] if isinstance(payload["test_config"], dict) else payload)
+        )
         _assert_valid_test_config(config)
         payload["test_config"] = config
     return payload
@@ -3183,7 +3193,7 @@ def run_wizard_init(args: argparse.Namespace) -> int:
 def run_wizard_status(_args: argparse.Namespace) -> int:
     from arga_cli.wizard.constants import TWIN_CATALOG
     from arga_cli.wizard.output import print_summary_box
-    from arga_cli.wizard.provision import with_proxy_token
+    from arga_cli.wizard.provision import callable_twin_base_url
     from arga_cli.wizard.session import load_session
 
     session = load_session(os.getcwd())
@@ -3211,8 +3221,7 @@ def run_wizard_status(_args: argparse.Namespace) -> int:
     proxy_token = status.get("proxy_token")
     for name, info in status.get("twins", {}).items():
         label = TWIN_CATALOG.get(name, {}).get("label", name).ljust(16)
-        base_url = info.get("base_url", "")
-        url = base_url if is_public else with_proxy_token(base_url, proxy_token)
+        url = callable_twin_base_url(info, proxy_token=proxy_token, is_public=is_public)
         lines.append(f"{label} [underline]{url}[/underline]")
     if status.get("expires_at"):
         lines.append("")
@@ -3417,7 +3426,9 @@ def _add_scenario_parsers(subparsers: argparse._SubParsersAction, *, deprecated_
     scenarios_create_parser.add_argument("--name", required=True, help="Scenario name")
     scenarios_create_parser.add_argument("--prompt", required=True, help="Natural-language twin state")
     scenarios_create_parser.add_argument("--description", default=None, help="Optional description")
-    scenarios_create_parser.add_argument("--twin", action="append", default=None, help="Restrict to a twin (repeatable)")
+    scenarios_create_parser.add_argument(
+        "--twin", action="append", default=None, help="Restrict to a twin (repeatable)"
+    )
     scenarios_create_parser.add_argument("--tag", action="append", default=None, help="Tag the scenario (repeatable)")
     scenarios_create_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
     _add_generation_mode_argument(scenarios_create_parser)
@@ -3629,13 +3640,15 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
     create_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
     create_parser.add_argument("--scenario-prompt", default=None, help="Scenario prompt to seed twins")
-    create_parser.add_argument(
-        "--private",
+    create_access = create_parser.add_mutually_exclusive_group()
+    create_access.add_argument(
+        "--public",
         action="store_true",
         default=False,
-        help="Keep twins behind proxy auth instead of using public base URLs",
+        help="Explicitly allow unauthenticated provider API access for this twin run",
     )
-    create_parser.add_argument(
+    create_access.add_argument("--private", action="store_false", dest="public", help=argparse.SUPPRESS)
+    create_access.add_argument(
         "--candidate-safe",
         action="store_true",
         default=False,
@@ -3813,7 +3826,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr_checks_config_set_parser.add_argument("repo", help="Repository in owner/repo format")
     pr_checks_config_set_parser.add_argument("--trigger", choices=("pr", "branch"), help="Validation trigger mode")
     pr_checks_config_set_parser.add_argument("--branch", help="Branch to monitor when using branch trigger mode")
-    pr_checks_config_set_parser.add_argument("--comments", choices=("on", "off"), help="Whether PR comments are enabled")
+    pr_checks_config_set_parser.add_argument(
+        "--comments", choices=("on", "off"), help="Whether PR comments are enabled"
+    )
     pr_checks_config_set_parser.set_defaults(func=run_validate_config_set)
     pr_checks_enabled_parser = pr_checks_subparsers.add_parser("enabled", help="List enabled PR check configs")
     pr_checks_enabled_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
@@ -3858,13 +3873,15 @@ def build_parser() -> argparse.ArgumentParser:
     twins_provision_parser.add_argument("--ttl", type=int, default=None, help="TTL in minutes")
     twins_provision_parser.add_argument("--scenario-id", default=None, help="Saved scenario ID to seed twins")
     twins_provision_parser.add_argument("--scenario-prompt", default=None, help="Scenario prompt to seed twins")
-    twins_provision_parser.add_argument(
-        "--private",
+    provision_access = twins_provision_parser.add_mutually_exclusive_group()
+    provision_access.add_argument(
+        "--public",
         action="store_true",
         default=False,
-        help="Keep twins behind proxy auth instead of using public base URLs",
+        help="Explicitly allow unauthenticated provider API access for this twin run",
     )
-    twins_provision_parser.add_argument(
+    provision_access.add_argument("--private", action="store_false", dest="public", help=argparse.SUPPRESS)
+    provision_access.add_argument(
         "--candidate-safe",
         action="store_true",
         default=False,

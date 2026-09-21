@@ -21,7 +21,7 @@ def test_twins_provision_wait_polls_until_ready_and_prints_env(monkeypatch, caps
             "ttl_minutes": 30,
             "scenario_prompt": None,
             "scenario_id": None,
-            "public": True,
+            "public": False,
         }
         return {"run_id": "run_wait", "status": "queued"}
 
@@ -129,6 +129,41 @@ def test_twin_run_candidate_safe_flag_requests_api_only_surface(monkeypatch, cap
         "access_profile": "candidate_api_only",
     }
     assert "run_candidate_safe" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["twin-runs", "create", "--twins", "slack", "--private", "--candidate-safe"],
+        ["previews", "twins", "provision", "--twins", "slack", "--private", "--candidate-safe"],
+    ],
+)
+def test_candidate_safe_rejects_conflicting_private_flag(argv: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        main.build_parser().parse_args(argv)
+
+
+def test_private_capability_base_url_is_not_decorated_with_query_token(capsys) -> None:
+    base_url = "https://ccapability--slack.sandbox.argalabs.com"
+
+    main._print_twin_env_vars(
+        {
+            "is_public": False,
+            "proxy_token": "proxy-jwt",
+            "twins": {
+                "slack": {
+                    "label": "Slack",
+                    "base_url": base_url,
+                    "access_mode": "capability",
+                    "env_vars": {"SLACK_API_URL": f"{base_url}/api"},
+                }
+            },
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert f"Base URL: {base_url}" in output
+    assert "?token=" not in output
 
 
 def test_twins_list_json_keeps_machine_readable_catalog_shape(monkeypatch, capsys) -> None:

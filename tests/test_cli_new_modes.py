@@ -305,18 +305,18 @@ def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
         client.close()
 
     assert captured == [
-            (
-                "https://api.argalabs.com/test-runs",
-                {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/test-runs/runner_run_123/rerun",
-                {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/tests/test_123/run",
-                {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
-            ),
+        (
+            "https://api.argalabs.com/test-runs",
+            {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/test-runs/runner_run_123/rerun",
+            {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/tests/test_123/run",
+            {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
+        ),
     ]
 
 
@@ -326,8 +326,12 @@ def test_test_runner_runs_url_accepts_sandbox_id(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
 
-    def fake_create(self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None):
-        captured.update({"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config})
+    def fake_create(
+        self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None
+    ):
+        captured.update(
+            {"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config}
+        )
         return {"id": "runner_run_123", "status": "queued", "sandbox_id": sandbox_id}
 
     monkeypatch.setattr(main.ApiClient, "create_demo_run", fake_create)
@@ -689,10 +693,11 @@ def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
         "ttl_minutes": 30,
         "scenario_prompt": "seed Linear issues and project updates",
         "scenario_id": None,
-        "public": True,
+        "public": False,
     }
     assert "Twin provisioning started." in output
     assert "Run ID: linear_run" in output
+
 
 def test_twins_provision_accepts_gitlab(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
@@ -744,7 +749,7 @@ def test_twins_provision_accepts_gitlab(monkeypatch, capsys) -> None:
         "ttl_minutes": 30,
         "scenario_prompt": "seed GitLab projects and merge requests",
         "scenario_id": None,
-        "public": True,
+        "public": False,
     }
     assert "Twin provisioning started." in output
     assert "Run ID: gitlab_run" in output
@@ -804,6 +809,24 @@ def test_twins_provision_supports_private_and_scenario_id(monkeypatch, capsys) -
         "public": False,
     }
     assert "Run ID: private_run" in output
+
+
+def test_twins_provision_requires_explicit_public_opt_in(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured = {}
+
+    def fake_provision(self, **kwargs):
+        captured.update(kwargs)
+        return {"run_id": "public_run", "status": "queued"}
+
+    monkeypatch.setattr(main.ApiClient, "provision_twins_start", fake_provision)
+    args = main.build_parser().parse_args(["previews", "twins", "provision", "--twins", "slack", "--public"])
+
+    assert args.func(args) == 0
+    assert captured["public"] is True
+    assert "Run ID: public_run" in capsys.readouterr().out
 
 
 def test_twins_list_prints_catalog(monkeypatch, capsys) -> None:

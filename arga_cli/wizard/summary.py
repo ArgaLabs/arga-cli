@@ -6,6 +6,7 @@ from datetime import datetime
 
 from arga_cli.wizard.constants import DASHBOARD_BASE_URL, SESSION_FILE, TWIN_CATALOG
 from arga_cli.wizard.output import console, dim, print_summary_box
+from arga_cli.wizard.provision import callable_twin_base_url
 from arga_cli.wizard.session import save_session
 
 
@@ -13,6 +14,7 @@ def print_summary(cwd: str, status: dict, api_url: str, api_key: str, scenario_i
     """Print the final summary and write the session state file."""
     dashboard_url = status.get("dashboard_url") or f"{DASHBOARD_BASE_URL}/runs/{status['run_id']}"
     proxy_token = status.get("proxy_token")
+    is_public = bool(status.get("is_public"))
 
     lines = [
         "[bold green]Arga Twins \u2014 Ready![/bold green]",
@@ -31,7 +33,7 @@ def print_summary(cwd: str, status: dict, api_url: str, api_key: str, scenario_i
 
     for name, info in status.get("twins", {}).items():
         label = TWIN_CATALOG.get(name, {}).get("label", name)
-        url = info.get("base_url", "")
+        url = callable_twin_base_url(info, proxy_token=proxy_token, is_public=is_public)
         console.print(
             f"  [bold cyan]{label}[/bold cyan]: [underline]{url}[/underline]", soft_wrap=True, overflow="ignore"
         )
