@@ -21,7 +21,7 @@ def test_twins_provision_wait_polls_until_ready_and_prints_env(monkeypatch, caps
             "ttl_minutes": 30,
             "scenario_prompt": None,
             "scenario_id": None,
-            "public": True,
+            "public": False,
         }
         return {"run_id": "run_wait", "status": "queued"}
 
