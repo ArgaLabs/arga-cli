@@ -3645,7 +3645,7 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
         "--public",
         action="store_true",
         default=False,
-        help="Explicitly allow unauthenticated provider API access for this twin run",
+        help="Explicitly allow full unauthenticated access to twin APIs, UI, root, docs, and OpenAPI",
     )
     create_access.add_argument("--private", action="store_false", dest="public", help=argparse.SUPPRESS)
     create_access.add_argument(
@@ -3878,7 +3878,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--public",
         action="store_true",
         default=False,
-        help="Explicitly allow unauthenticated provider API access for this twin run",
+        help="Explicitly allow full unauthenticated access to twin APIs, UI, root, docs, and OpenAPI",
     )
     provision_access.add_argument("--private", action="store_false", dest="public", help=argparse.SUPPRESS)
     provision_access.add_argument(

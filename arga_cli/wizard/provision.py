@@ -28,8 +28,8 @@ def with_proxy_token(url: str, proxy_token: str | None) -> str:
 
 def callable_twin_base_url(info: dict, *, proxy_token: str | None, is_public: bool) -> str:
     """Return a callable URL for current and legacy server responses."""
-    base_url = info.get("base_url", "")
-    if is_public or info.get("access_mode") == "capability":
+    base_url = info.get("base_url") or ""
+    if not base_url or is_public or info.get("access_mode") == "capability":
         return base_url
     return with_proxy_token(base_url, proxy_token)
 
@@ -44,7 +44,12 @@ def provision_twins(
     """Provision twins and poll until ready, showing progress."""
     header("Provisioning twin instances...")
 
-    payload: dict[str, Any] = {"twins": twins, "ttl_minutes": ttl_minutes, "scenario": "quickstart"}
+    payload: dict[str, Any] = {
+        "twins": twins,
+        "ttl_minutes": ttl_minutes,
+        "scenario": "quickstart",
+        "public": False,
+    }
     if scenario_prompt:
         payload["scenario_prompt"] = scenario_prompt
 

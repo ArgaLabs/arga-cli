@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from arga_cli import main
+from arga_cli.wizard import provision
 
 
 def test_twins_provision_wait_polls_until_ready_and_prints_env(monkeypatch, capsys) -> None:
@@ -164,6 +166,52 @@ def test_private_capability_base_url_is_not_decorated_with_query_token(capsys) -
     output = capsys.readouterr().out
     assert f"Base URL: {base_url}" in output
     assert "?token=" not in output
+
+
+@pytest.mark.parametrize(
+    ("info", "is_public", "expected"),
+    [
+        ({"base_url": "https://private.example"}, False, "https://private.example?token=proxy-jwt"),
+        ({"base_url": "https://public.example"}, True, "https://public.example"),
+        ({}, False, ""),
+        ({"base_url": ""}, False, ""),
+        ({"base_url": None}, False, ""),
+    ],
+)
+def test_print_twin_base_urls_supports_legacy_and_missing_urls(info, is_public, expected, capsys) -> None:
+    main._print_twin_env_vars({"is_public": is_public, "proxy_token": "proxy-jwt", "twins": {"slack": info}})
+
+    output = capsys.readouterr().out
+    assert f"    Base URL: {expected}\n" in output
+    if "?token=" not in expected:
+        assert "proxy-jwt" not in output
+
+
+def test_wizard_provision_explicitly_requests_private_twins(monkeypatch) -> None:
+    requests = []
+    status = {"run_id": "wizard_run", "status": "ready", "twins": {}}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=status)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as transport:
+        monkeypatch.setattr(main.httpx, "Client", lambda **kwargs: transport)
+        client = main.ApiClient("https://api.example.com", api_key="arga_test_key")
+        result = provision.provision_twins(client, ["slack"], ttl_minutes=20, scenario_prompt="Seed a channel")
+
+    assert result == status
+    assert [(request.method, str(request.url)) for request in requests] == [
+        ("POST", "https://api.example.com/twin-runs"),
+        ("GET", "https://api.example.com/twin-runs/wizard_run"),
+    ]
+    assert json.loads(requests[0].content) == {
+        "twins": ["slack"],
+        "ttl_minutes": 20,
+        "scenario": "quickstart",
+        "scenario_prompt": "Seed a channel",
+        "public": False,
+    }
 
 
 def test_twins_list_json_keeps_machine_readable_catalog_shape(monkeypatch, capsys) -> None:
