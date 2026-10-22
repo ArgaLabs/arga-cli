@@ -15,6 +15,8 @@ def test_github_actions_execution_uses_one_private_github_twin(monkeypatch, comm
     captured = []
 
     def respond(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"name": "github", "github_actions_modes": ["simulated", "execute"]}])
         captured.append(json.loads(request.content))
         return httpx.Response(200, json={"run_id": "github-run", "status": "queued"})
 
@@ -48,6 +50,25 @@ def test_github_execution_requires_github_before_loading_credentials(monkeypatch
     )
     with pytest.raises(main.CliError, match="requires --twins github"):
         args.func(args)
+
+
+@pytest.mark.parametrize("modes", [None, ["simulated"]])
+def test_github_execution_never_silently_downgrades_to_simulation(monkeypatch, modes):
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    requests = []
+
+    def respond(request):
+        requests.append(request.method)
+        return httpx.Response(200, json=[{"name": "github", "github_actions_modes": modes}])
+
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    client._client.close()
+    client._client = httpx.Client(transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(main, "ApiClient", lambda *args, **kwargs: client)
+    args = main.build_parser().parse_args(["twin-runs", "create", "--twins", "github", "--execute-github-actions"])
+    with pytest.raises(main.CliError, match="not available"):
+        args.func(args)
+    assert requests == ["GET"]
 
 
 def test_start_pr_run_posts_to_new_endpoint(monkeypatch) -> None:

@@ -1616,6 +1616,10 @@ def run_twins_provision(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     client = ApiClient(args.api_url, api_key=api_key)
     try:
+        if execute_actions:
+            github = next((twin for twin in client.list_twins() if twin.get("name") == "github"), {})
+            if "execute" not in (github.get("github_actions_modes") or []):
+                raise CliError("GitHub Actions execution is not available for this account or API server.")
         ttl_minutes = _resolve_ttl(client, args.ttl)
         provision_kwargs: dict[str, Any] = {
             "twins": twins,
