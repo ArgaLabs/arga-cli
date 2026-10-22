@@ -53,7 +53,12 @@ jobs:
         run: |
           CLI_WHEELS=(dist/*.whl)
           test "${#CLI_WHEELS[@]}" -eq 1
-          uv tool run --isolated --from "${CLI_WHEELS[0]}" arga --version
+          EXPECTED_VERSION=$(uv version --short)
+          INSTALLED_VERSION=$(uv tool run --isolated --from "${CLI_WHEELS[0]}" arga --version)
+          if [ "$INSTALLED_VERSION" != "arga $EXPECTED_VERSION" ]; then
+            echo "Installed CLI version ($INSTALLED_VERSION) does not match expected version (arga $EXPECTED_VERSION)."
+            exit 1
+          fi
           uv tool run --isolated --from "${CLI_WHEELS[0]}" arga twin-runs create --help | grep -F -- '--execute-github-actions'
 
       - name: Publish to TestPyPI
