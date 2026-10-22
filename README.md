@@ -89,6 +89,17 @@ arga previews twins reset <run_id>
 arga previews twins teardown <run_id>
 ```
 
+GitHub includes Actions simulation by default. Eligible internal accounts can
+opt into executing supported workflows in the same GitHub twin:
+
+```bash
+arga twin-runs create --twins github --execute-github-actions --ttl 60 --wait
+```
+
+Execution automatically makes the run private. It requires enabled internal
+access and a verified `@argalabs.com` account. The legacy `github_actions` twin
+name remains accepted for compatibility; new workflows should select `github`.
+
 Create and run saved tests:
 
 ```bash
