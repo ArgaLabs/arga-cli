@@ -2,7 +2,52 @@ from __future__ import annotations
 
 import json
 
+import httpx
+import pytest
+
 from arga_cli import main
+
+
+@pytest.mark.parametrize("command", [["twin-runs", "create"], ["previews", "twins", "provision"]])
+def test_github_actions_execution_uses_one_private_github_twin(monkeypatch, command):
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured = []
+
+    def respond(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={"run_id": "github-run", "status": "queued"})
+
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    client._client.close()
+    client._client = httpx.Client(transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(main, "ApiClient", lambda *args, **kwargs: client)
+    args = main.build_parser().parse_args([*command, "--twins", "github", "--execute-github-actions", "--ttl", "30"])
+    assert args.func(args) == 0
+    assert captured == [
+        {
+            "twins": ["github"],
+            "ttl_minutes": 30,
+            "scenario": "quickstart",
+            "public": False,
+            "github_actions_mode": "execute",
+        }
+    ]
+
+
+def test_github_execution_requires_github_before_loading_credentials(monkeypatch):
+    monkeypatch.setattr(main, "load_api_key", lambda: pytest.fail("Must reject before reading credentials"))
+    args = main.build_parser().parse_args(
+        [
+            "twin-runs",
+            "create",
+            "--twins",
+            "slack",
+            "--execute-github-actions",
+        ]
+    )
+    with pytest.raises(main.CliError, match="requires --twins github"):
+        args.func(args)
 
 
 def test_start_pr_run_posts_to_new_endpoint(monkeypatch) -> None:
@@ -305,18 +350,18 @@ def test_test_runner_api_methods_send_sandbox_id(monkeypatch) -> None:
         client.close()
 
     assert captured == [
-            (
-                "https://api.argalabs.com/test-runs",
-                {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/test-runs/runner_run_123/rerun",
-                {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
-            ),
-            (
-                "https://api.argalabs.com/tests/test_123/run",
-                {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
-            ),
+        (
+            "https://api.argalabs.com/test-runs",
+            {"prompt": "Smoke checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/test-runs/runner_run_123/rerun",
+            {"prompt": "Retry checkout", "sandbox_id": "sandbox_123"},
+        ),
+        (
+            "https://api.argalabs.com/tests/test_123/run",
+            {"sandbox_id": "sandbox_123", "prompt": "Run saved checkout"},
+        ),
     ]
 
 
@@ -326,8 +371,12 @@ def test_test_runner_runs_url_accepts_sandbox_id(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main.ApiClient, "close", lambda self: None)
     captured: dict[str, object] = {}
 
-    def fake_create(self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None):
-        captured.update({"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config})
+    def fake_create(
+        self, *, prompt: str, start_url: str | None = None, sandbox_id: str | None = None, test_config=None
+    ):
+        captured.update(
+            {"prompt": prompt, "start_url": start_url, "sandbox_id": sandbox_id, "test_config": test_config}
+        )
         return {"id": "runner_run_123", "status": "queued", "sandbox_id": sandbox_id}
 
     monkeypatch.setattr(main.ApiClient, "create_demo_run", fake_create)
@@ -693,6 +742,7 @@ def test_twins_provision_accepts_linear(monkeypatch, capsys) -> None:
     }
     assert "Twin provisioning started." in output
     assert "Run ID: linear_run" in output
+
 
 def test_twins_provision_accepts_gitlab(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
