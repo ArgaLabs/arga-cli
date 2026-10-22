@@ -1626,7 +1626,7 @@ def run_twins_provision(args: argparse.Namespace) -> int:
             "ttl_minutes": ttl_minutes or 30,
             "scenario_prompt": getattr(args, "scenario_prompt", None),
             "scenario_id": getattr(args, "scenario_id", None),
-            "public": not (getattr(args, "private", False) or execute_actions or "github_actions" in twins),
+            "public": not (getattr(args, "private", False) or execute_actions),
         }
         if execute_actions:
             provision_kwargs["github_actions_mode"] = "execute"

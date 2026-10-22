@@ -37,6 +37,36 @@ def test_github_actions_execution_uses_one_private_github_twin(monkeypatch, comm
     ]
 
 
+@pytest.mark.parametrize("command", [["twin-runs", "create"], ["previews", "twins", "provision"]])
+@pytest.mark.parametrize("private", [False, True])
+def test_legacy_github_actions_preserves_requested_privacy(monkeypatch, command, private):
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga_api_key")
+    monkeypatch.setattr(main, "_resolve_ttl", lambda client, ttl: ttl)
+    captured = []
+
+    def respond(request):
+        assert request.method == "POST"
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={"run_id": "github-run", "status": "queued"})
+
+    client = main.ApiClient("https://api.argalabs.com", api_key="arga_api_key")
+    client._client.close()
+    client._client = httpx.Client(transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(main, "ApiClient", lambda *args, **kwargs: client)
+    flags = ["--private"] if private else []
+    args = main.build_parser().parse_args([*command, "--twins", "github_actions", "--ttl", "30", *flags])
+
+    assert args.func(args) == 0
+    assert captured == [
+        {
+            "twins": ["github_actions"],
+            "ttl_minutes": 30,
+            "scenario": "quickstart",
+            "public": not private,
+        }
+    ]
+
+
 def test_github_execution_requires_github_before_loading_credentials(monkeypatch):
     monkeypatch.setattr(main, "load_api_key", lambda: pytest.fail("Must reject before reading credentials"))
     args = main.build_parser().parse_args(
