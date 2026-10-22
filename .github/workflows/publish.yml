@@ -49,6 +49,13 @@ jobs:
       - name: Build distributions
         run: uv build
 
+      - name: Verify installed distribution
+        run: |
+          CLI_WHEELS=(dist/*.whl)
+          test "${#CLI_WHEELS[@]}" -eq 1
+          uv tool run --isolated --from "${CLI_WHEELS[0]}" arga --version
+          uv tool run --isolated --from "${CLI_WHEELS[0]}" arga twin-runs create --help | grep -F -- '--execute-github-actions'
+
       - name: Publish to TestPyPI
         if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
         run: uv publish --publish-url https://test.pypi.org/legacy/
