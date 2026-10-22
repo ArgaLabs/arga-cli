@@ -3671,7 +3671,7 @@ def _add_twin_run_parsers(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument(
         "--execute-github-actions",
         action="store_true",
-        help="Run supported GitHub Actions workflows in an isolated runner (internal access; makes the run private)",
+        help="Run supported GitHub Actions workflows in an isolated runner (makes the run private)",
     )
     create_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
     create_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
@@ -3907,7 +3907,7 @@ def build_parser() -> argparse.ArgumentParser:
     twins_provision_parser.add_argument(
         "--execute-github-actions",
         action="store_true",
-        help="Run supported GitHub Actions workflows in an isolated runner (internal access; makes the run private)",
+        help="Run supported GitHub Actions workflows in an isolated runner (makes the run private)",
     )
     twins_provision_parser.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
     twins_provision_parser.add_argument("--json", action="store_true", default=False, help="Output result as JSON")
