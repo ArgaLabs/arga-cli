@@ -49,6 +49,18 @@ jobs:
       - name: Build distributions
         run: uv build
 
+      - name: Verify installed distribution
+        run: |
+          CLI_WHEELS=(dist/*.whl)
+          test "${#CLI_WHEELS[@]}" -eq 1
+          EXPECTED_VERSION=$(uv version --short)
+          INSTALLED_VERSION=$(uv tool run --isolated --from "${CLI_WHEELS[0]}" arga --version)
+          if [ "$INSTALLED_VERSION" != "arga $EXPECTED_VERSION" ]; then
+            echo "Installed CLI version ($INSTALLED_VERSION) does not match expected version (arga $EXPECTED_VERSION)."
+            exit 1
+          fi
+          uv tool run --isolated --from "${CLI_WHEELS[0]}" arga twin-runs create --help | grep -F -- '--execute-github-actions'
+
       - name: Publish to TestPyPI
         if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
         run: uv publish --publish-url https://test.pypi.org/legacy/

@@ -453,12 +453,18 @@ Publishing flow:
 - Automatic PyPI publish: push a tag like `v0.1.0`.
 - The workflow verifies that the tag version matches `project.version` in `pyproject.toml`, builds the package with `uv build`, and publishes with `uv publish`.
 
-Typical release steps:
+Before each release, run `uv version --bump patch` (or set the intended version
+with `uv version X.Y.Z`). Commit both `pyproject.toml` and `uv.lock` with the
+features being released, and merge them before tagging. An already published
+version cannot distribute later feature changes.
+
+From that merged commit:
 
 ```bash
 uv run pytest
-git tag v0.1.0
-git push origin v0.1.0
+uv build
+git tag "v$(uv version --short)"
+git push origin "v$(uv version --short)"
 ```
 
 ## Config Storage
