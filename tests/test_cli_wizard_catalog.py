@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from arga_cli import main, wizard
 from arga_cli.wizard import env, prompts
 from arga_cli.wizard.constants import QUICKSTART_SUMMARIES, TWIN_CATALOG, TWIN_ENV_MAPPINGS
@@ -49,12 +51,33 @@ def test_bundled_wizard_catalog_covers_every_current_selectable_twin() -> None:
     assert set(QUICKSTART_SUMMARIES) == EXPECTED_TWINS
 
 
-def test_new_twin_credentials_resolve_to_local_defaults() -> None:
-    assert env.resolve_env_var("TWILIO_ACCOUNT_SID", ["twilio"])["default_value"] == "AC" + "a" * 32
-    assert env.resolve_env_var("TWILIO_AUTH_TOKEN", ["twilio"])["default_value"] == "twilio-twin-auth-token"
-    assert env.resolve_env_var("TWILIO_CONVERSATIONS_BASE_URL", ["twilio"]) == {"twin": "twilio", "default_value": ""}
+@pytest.mark.parametrize(
+    ("key", "expected_default"),
+    [
+        ("TWILIO_ACCOUNT_SID", "AC" + "a" * 32),
+        ("TWILIO_AUTH_TOKEN", "twilio-twin-auth-token"),
+        ("TWILIO_API_KEY", "SK" + "b" * 32),
+        ("TWILIO_API_SECRET", "twilio-twin-api-secret"),
+        ("TWILIO_PHONE_NUMBER", "+15005550006"),
+        ("TWILIO_OAUTH_CLIENT_ID", "twilio-twin-client"),
+        ("TWILIO_OAUTH_CLIENT_SECRET", "twilio-twin-client-secret"),
+        ("TWILIO_MESSAGING_BASE_URL", ""),
+        ("TWILIO_VERIFY_BASE_URL", ""),
+        ("TWILIO_VOICE_BASE_URL", ""),
+        ("TWILIO_CONVERSATIONS_BASE_URL", ""),
+    ],
+)
+def test_twilio_env_vars_resolve_only_when_selected(key: str, expected_default: str) -> None:
+    assert env.resolve_env_var(key, ["twilio"]) == {"twin": "twilio", "default_value": expected_default}
+    assert env.resolve_env_var(key, ["slack"]) is None
+
+
+def test_twilio_catalog_routes_messaging_to_the_local_twin() -> None:
     assert TWIN_CATALOG["twilio"]["port"] == 12152
-    assert "messaging.twilio.com" in TWIN_CATALOG["twilio"]["intercept_domains"]
+    assert any(host == "messaging.twilio.com" for host in TWIN_CATALOG["twilio"]["intercept_domains"])
+
+
+def test_new_twin_credentials_resolve_to_local_defaults() -> None:
     assert env.resolve_env_var("GMAIL_ACCESS_TOKEN", ["gmail"]) == {
         "twin": "gmail",
         "default_value": "ya29.gmail-twin-owner",

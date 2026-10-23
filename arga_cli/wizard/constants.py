@@ -291,7 +291,7 @@ TWIN_CATALOG: dict[str, dict] = {
 
 TWIN_ENV_MAPPINGS: dict[str, dict] = {
     "twilio": {
-        "token_vars": ["TWILIO_ACCOUNT_SID", "TWILIO_API_KEY", "TWILIO_PHONE_NUMBER"],
+        "token_vars": ["TWILIO_ACCOUNT_SID", "TWILIO_API_KEY", "TWILIO_PHONE_NUMBER", "TWILIO_OAUTH_CLIENT_ID"],
         "secret_vars": [
             "TWILIO_AUTH_TOKEN",
             "TWILIO_API_SECRET",
