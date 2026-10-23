@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from arga_cli import main, wizard
 from arga_cli.wizard import env, prompts
 from arga_cli.wizard.constants import QUICKSTART_SUMMARIES, TWIN_CATALOG, TWIN_ENV_MAPPINGS
 
 EXPECTED_TWINS = {
+    "twilio",
     "attio",
     "box",
     "calendly",
@@ -46,6 +49,83 @@ def test_bundled_wizard_catalog_covers_every_current_selectable_twin() -> None:
     assert set(TWIN_CATALOG) == EXPECTED_TWINS
     assert set(TWIN_ENV_MAPPINGS) == EXPECTED_TWINS
     assert set(QUICKSTART_SUMMARIES) == EXPECTED_TWINS
+
+
+@pytest.mark.parametrize(
+    ("key", "expected_default"),
+    [
+        ("TWILIO_ACCOUNT_SID", "AC" + "a" * 32),
+        ("TWILIO_AUTH_TOKEN", "twilio-twin-auth-token"),
+        ("TWILIO_API_KEY", "SK" + "b" * 32),
+        ("TWILIO_API_SECRET", "twilio-twin-api-secret"),
+        ("TWILIO_PHONE_NUMBER", "+15005550006"),
+        ("TWILIO_OAUTH_CLIENT_ID", "twilio-twin-client"),
+        ("TWILIO_OAUTH_CLIENT_SECRET", "twilio-twin-client-secret"),
+        ("SENDGRID_API_KEY", "SG.twilio-twin-api-key"),
+        ("SEGMENT_ACCESS_TOKEN", "segment-twin-token"),
+        ("SEGMENT_WRITE_KEY", "segment-twin-write-key"),
+        ("AUTHY_API_KEY", "authy-twin-key"),
+        ("AUTHY_ACCESS_KEY", "authy-twin-access-key"),
+        ("AUTHY_SIGNING_KEY", "authy-twin-signing-key"),
+        ("TWILIO_TWIN_BASE_URL", ""),
+        ("TWILIO_BASE_URL", ""),
+        ("TWILIO_API_BASE_URL", ""),
+        ("TWILIO_MESSAGING_BASE_URL", ""),
+        ("TWILIO_VERIFY_BASE_URL", ""),
+        ("TWILIO_CONVERSATIONS_BASE_URL", ""),
+        ("TWILIO_ACCOUNTS_BASE_URL", ""),
+        ("TWILIO_AUTHY_BASE_URL", ""),
+        ("TWILIO_BULKEXPORTS_BASE_URL", ""),
+        ("TWILIO_CHAT_BASE_URL", ""),
+        ("TWILIO_CONTENT_BASE_URL", ""),
+        ("TWILIO_EVENTS_BASE_URL", ""),
+        ("TWILIO_FLEX_API_BASE_URL", ""),
+        ("TWILIO_FRONTLINE_API_BASE_URL", ""),
+        ("TWILIO_IAM_BASE_URL", ""),
+        ("TWILIO_INSIGHTS_BASE_URL", ""),
+        ("TWILIO_INTELLIGENCE_BASE_URL", ""),
+        ("TWILIO_IP_MESSAGING_BASE_URL", ""),
+        ("TWILIO_KNOWLEDGE_BASE_URL", ""),
+        ("TWILIO_LOOKUPS_BASE_URL", ""),
+        ("TWILIO_MARKETPLACE_BASE_URL", ""),
+        ("TWILIO_MEMORY_BASE_URL", ""),
+        ("TWILIO_MONITOR_BASE_URL", ""),
+        ("TWILIO_NOTIFY_BASE_URL", ""),
+        ("TWILIO_NUMBERS_BASE_URL", ""),
+        ("TWILIO_OAUTH_BASE_URL", ""),
+        ("TWILIO_PREVIEW_BASE_URL", ""),
+        ("TWILIO_PREVIEW_IAM_BASE_URL", ""),
+        ("TWILIO_PRICING_BASE_URL", ""),
+        ("TWILIO_PROXY_BASE_URL", ""),
+        ("TWILIO_ROUTES_BASE_URL", ""),
+        ("TWILIO_SEGMENT_BASE_URL", ""),
+        ("TWILIO_SEGMENT_TRACKING_BASE_URL", ""),
+        ("TWILIO_SENDGRID_BASE_URL", ""),
+        ("TWILIO_SERVERLESS_BASE_URL", ""),
+        ("TWILIO_STUDIO_BASE_URL", ""),
+        ("TWILIO_SUPERSIM_BASE_URL", ""),
+        ("TWILIO_SYNC_BASE_URL", ""),
+        ("TWILIO_TASKROUTER_BASE_URL", ""),
+        ("TWILIO_TRUNKING_BASE_URL", ""),
+        ("TWILIO_TRUSTHUB_BASE_URL", ""),
+        ("TWILIO_VIDEO_BASE_URL", ""),
+        ("TWILIO_VOICE_BASE_URL", ""),
+        ("TWILIO_WIRELESS_BASE_URL", ""),
+        ("SENDGRID_BASE_URL", ""),
+        ("SEGMENT_BASE_URL", ""),
+        ("AUTHY_BASE_URL", ""),
+        ("SEGMENT_TRACKING_BASE_URL", ""),
+        ("TWILIO_SERVERLESS_UPLOAD_BASE_URL", ""),
+    ],
+)
+def test_twilio_env_vars_resolve_only_when_selected(key: str, expected_default: str) -> None:
+    assert env.resolve_env_var(key, ["twilio"]) == {"twin": "twilio", "default_value": expected_default}
+    assert env.resolve_env_var(key, ["slack"]) is None
+
+
+def test_twilio_catalog_routes_messaging_to_the_local_twin() -> None:
+    assert TWIN_CATALOG["twilio"]["port"] == 12152
+    assert any(host == "messaging.twilio.com" for host in TWIN_CATALOG["twilio"]["intercept_domains"])
 
 
 def test_new_twin_credentials_resolve_to_local_defaults() -> None:
