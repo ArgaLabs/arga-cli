@@ -19,6 +19,33 @@ ENV_FILE_NAMES = [
 # ---------------------------------------------------------------------------
 
 TWIN_CATALOG: dict[str, dict] = {
+    "loops": {
+        "label": "Loops",
+        "port": 12154,
+        "kind": "frontend",
+        "show_in_ui": True,
+        "intercept_domains": ["app.loops.so"],
+    },
+    "thatch": {
+        "label": "Thatch",
+        "port": 12157,
+        "kind": "frontend",
+        "show_in_ui": True,
+        "intercept_domains": ["partners.thatchcloud.com", "app.thatch.com"],
+    },
+    "symmetry_i9": {
+        "label": "Symmetry I-9",
+        "port": 12156,
+        "kind": "backend",
+        "show_in_ui": True,
+        # These are display hints, not whole-host interception rules. Other
+        # Symmetry products are outside this twin's server routing scope.
+        "intercept_domains": [
+            "api.symmetry.com/i9",
+            "api.symmetry.com/authentication",
+            "symmetry-i9-twin.workbright.com",
+        ],
+    },
     "twilio": {
         "label": "Twilio",
         "port": 12152,
@@ -290,6 +317,25 @@ TWIN_CATALOG: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 TWIN_ENV_MAPPINGS: dict[str, dict] = {
+    "loops": {
+        "token_vars": [],
+        "secret_vars": ["LOOPS_API_KEY"],
+        "url_vars": ["LOOPS_API_BASE_URL"],
+        "defaults": {"LOOPS_API_KEY": "loops_test_key"},
+    },
+    "thatch": {
+        "token_vars": [],
+        "secret_vars": ["THATCH_API_KEY"],
+        "url_vars": ["THATCH_API_BASE_URL"],
+        "defaults": {"THATCH_API_KEY": "sk_thatch_twin"},
+    },
+    "symmetry_i9": {
+        "token_vars": [],
+        "secret_vars": ["SYMMETRY_I9_API_KEY", "SYMMETRY_I9_ACCESS_TOKEN"],
+        "url_vars": ["SYMMETRY_I9_BASE_URL", "SYMMETRY_AUTH_BASE_URL"],
+        # Access tokens expire and must come from the running twin's login flow.
+        "defaults": {"SYMMETRY_I9_API_KEY": "symmetry_i9_test_key"},
+    },
     "twilio": {
         "token_vars": ["TWILIO_ACCOUNT_SID", "TWILIO_API_KEY", "TWILIO_PHONE_NUMBER", "TWILIO_OAUTH_CLIENT_ID"],
         "secret_vars": [
@@ -880,6 +926,25 @@ TOKEN_SHAPES: list[dict] = [
 # ---------------------------------------------------------------------------
 
 QUICKSTART_SUMMARIES: dict[str, list[str]] = {
+    "loops": [
+        "Loops contacts, events, transactional email and workflow API simulation",
+        "API key: loops_test_key",
+        "Use LOOPS_API_BASE_URL from the sandbox connection environment (includes /api/v1)",
+        "Documentation-based twin; live-provider fidelity remains unverified",
+    ],
+    "thatch": [
+        "Thatch employer, employee, pay schedule and benefits API simulation",
+        "API key: sk_thatch_twin",
+        "Use THATCH_API_BASE_URL from the sandbox connection environment (includes /api/partners/v1)",
+        "Documentation-based twin; full embedded onboarding and live fidelity are deferred",
+    ],
+    "symmetry_i9": [
+        "Symmetry I-9 API simulation; other Symmetry products are not included",
+        "API key: symmetry_i9_test_key",
+        "GET $SYMMETRY_AUTH_BASE_URL/login with api-key header to obtain accessToken",
+        "Use Authorization: Bearer <accessToken> with SYMMETRY_I9_BASE_URL (includes /i9)",
+        "Use sandbox-provided URLs; full embedded forms and live fidelity are deferred",
+    ],
     "twilio": [
         "Messaging, Voice, Verify, and Conversations APIs plus Console ready",
         "Account SID: ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
