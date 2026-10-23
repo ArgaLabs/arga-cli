@@ -5,6 +5,7 @@ from arga_cli.wizard import env, prompts
 from arga_cli.wizard.constants import QUICKSTART_SUMMARIES, TWIN_CATALOG, TWIN_ENV_MAPPINGS
 
 EXPECTED_TWINS = {
+    "twilio",
     "attio",
     "box",
     "calendly",
@@ -49,6 +50,11 @@ def test_bundled_wizard_catalog_covers_every_current_selectable_twin() -> None:
 
 
 def test_new_twin_credentials_resolve_to_local_defaults() -> None:
+    assert env.resolve_env_var("TWILIO_ACCOUNT_SID", ["twilio"])["default_value"] == "AC" + "a" * 32
+    assert env.resolve_env_var("TWILIO_AUTH_TOKEN", ["twilio"])["default_value"] == "twilio-twin-auth-token"
+    assert env.resolve_env_var("TWILIO_CONVERSATIONS_BASE_URL", ["twilio"]) == {"twin": "twilio", "default_value": ""}
+    assert TWIN_CATALOG["twilio"]["port"] == 12152
+    assert "messaging.twilio.com" in TWIN_CATALOG["twilio"]["intercept_domains"]
     assert env.resolve_env_var("GMAIL_ACCESS_TOKEN", ["gmail"]) == {
         "twin": "gmail",
         "default_value": "ya29.gmail-twin-owner",

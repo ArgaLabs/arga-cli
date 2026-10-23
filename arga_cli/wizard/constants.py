@@ -19,6 +19,21 @@ ENV_FILE_NAMES = [
 # ---------------------------------------------------------------------------
 
 TWIN_CATALOG: dict[str, dict] = {
+    "twilio": {
+        "label": "Twilio",
+        "port": 12152,
+        "show_in_ui": True,
+        "intercept_domains": [
+            "api.twilio.com",
+            "messaging.twilio.com",
+            "verify.twilio.com",
+            "conversations.twilio.com",
+            "api.us1.twilio.com",
+            "api.ashburn.us1.twilio.com",
+            "api.dublin.ie1.twilio.com",
+            "api.sydney.au1.twilio.com",
+        ],
+    },
     "discord": {
         "label": "Discord",
         "port": 12110,
@@ -235,6 +250,25 @@ TWIN_CATALOG: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 TWIN_ENV_MAPPINGS: dict[str, dict] = {
+    "twilio": {
+        "token_vars": ["TWILIO_ACCOUNT_SID", "TWILIO_API_KEY", "TWILIO_PHONE_NUMBER"],
+        "secret_vars": ["TWILIO_AUTH_TOKEN", "TWILIO_API_SECRET"],
+        "url_vars": [
+            "TWILIO_TWIN_BASE_URL",
+            "TWILIO_BASE_URL",
+            "TWILIO_API_BASE_URL",
+            "TWILIO_MESSAGING_BASE_URL",
+            "TWILIO_VERIFY_BASE_URL",
+            "TWILIO_CONVERSATIONS_BASE_URL",
+        ],
+        "defaults": {
+            "TWILIO_ACCOUNT_SID": "ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "TWILIO_AUTH_TOKEN": "twilio-twin-auth-token",
+            "TWILIO_API_KEY": "SKbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "TWILIO_API_SECRET": "twilio-twin-api-secret",
+            "TWILIO_PHONE_NUMBER": "+15005550006",
+        },
+    },
     "discord": {
         "token_vars": ["DISCORD_TOKEN", "DISCORD_BOT_TOKEN"],
         "url_vars": ["DISCORD_API_URL", "DISCORD_BASE_URL"],
@@ -745,6 +779,13 @@ TOKEN_SHAPES: list[dict] = [
 # ---------------------------------------------------------------------------
 
 QUICKSTART_SUMMARIES: dict[str, list[str]] = {
+    "twilio": [
+        "Messaging, Voice, Verify, and Conversations APIs plus Console ready",
+        "Account SID: ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "Auth token: twilio-twin-auth-token",
+        "Phone number: +15005550006",
+        "Use the per-product base URLs from the sandbox connection environment for official SDKs",
+    ],
     "discord": [
         'Server: "Discord Twin Server"',
         "Channels: #general, #random, #voice",
