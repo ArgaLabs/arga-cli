@@ -7,6 +7,7 @@ from arga_cli.wizard import env, prompts
 from arga_cli.wizard.constants import QUICKSTART_SUMMARIES, TWIN_CATALOG, TWIN_ENV_MAPPINGS
 
 EXPECTED_TWINS = {
+    "bivo",
     "loops",
     "thatch",
     "symmetry_i9",
@@ -209,6 +210,10 @@ def test_run_wizard_passes_authoritative_catalog_to_selector(monkeypatch, tmp_pa
 @pytest.mark.parametrize(
     ("twin", "key", "expected"),
     [
+        ("bivo", "BIVO_API_TOKEN", "bivo_test_token"),
+        ("bivo", "BIVO_TENANT_IDENTIFIER", "bivo_test_tenant"),
+        ("bivo", "BIVO_BASE_URL", ""),
+        ("bivo", "BIVO_API_BASE_URL", ""),
         ("loops", "LOOPS_API_KEY", "loops_test_key"),
         ("loops", "LOOPS_API_BASE_URL", ""),
         ("thatch", "THATCH_API_KEY", "sk_thatch_twin"),
@@ -227,6 +232,7 @@ def test_customer_twin_variables_are_scoped_and_use_runtime_urls(twin, key, expe
 @pytest.mark.parametrize(
     ("twin", "port", "domains"),
     [
+        ("bivo", 12155, ["devapi.bivotech.co"]),
         ("loops", 12154, ["app.loops.so"]),
         ("thatch", 12157, ["partners.thatchcloud.com", "app.thatch.com"]),
         (

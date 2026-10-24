@@ -19,6 +19,13 @@ ENV_FILE_NAMES = [
 # ---------------------------------------------------------------------------
 
 TWIN_CATALOG: dict[str, dict] = {
+    "bivo": {
+        "label": "Bivo",
+        "port": 12155,
+        "kind": "backend",
+        "show_in_ui": True,
+        "intercept_domains": ["devapi.bivotech.co"],
+    },
     "loops": {
         "label": "Loops",
         "port": 12154,
@@ -317,6 +324,12 @@ TWIN_CATALOG: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 TWIN_ENV_MAPPINGS: dict[str, dict] = {
+    "bivo": {
+        "token_vars": ["BIVO_TENANT_IDENTIFIER"],
+        "secret_vars": ["BIVO_API_TOKEN"],
+        "url_vars": ["BIVO_BASE_URL", "BIVO_API_BASE_URL"],
+        "defaults": {"BIVO_API_TOKEN": "bivo_test_token", "BIVO_TENANT_IDENTIFIER": "bivo_test_tenant"},
+    },
     "loops": {
         "token_vars": [],
         "secret_vars": ["LOOPS_API_KEY"],
@@ -926,6 +939,12 @@ TOKEN_SHAPES: list[dict] = [
 # ---------------------------------------------------------------------------
 
 QUICKSTART_SUMMARIES: dict[str, list[str]] = {
+    "bivo": [
+        "Bivo accounts, ACH, wire, FX, card and coin API simulation",
+        "Use Authorization: Bearer bivo_test_token and X-Tenant-Identifier: bivo_test_tenant",
+        "Use BIVO_API_BASE_URL from the sandbox connection environment (includes /api-gateway/v1/admin)",
+        "Synthetic balances and simulated settlement; live-provider fidelity remains unverified",
+    ],
     "loops": [
         "Loops contacts, events, transactional email and workflow API simulation",
         "API key: loops_test_key",
