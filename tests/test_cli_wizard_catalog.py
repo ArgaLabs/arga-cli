@@ -7,6 +7,10 @@ from arga_cli.wizard import env, prompts
 from arga_cli.wizard.constants import QUICKSTART_SUMMARIES, TWIN_CATALOG, TWIN_ENV_MAPPINGS
 
 EXPECTED_TWINS = {
+    "bivo",
+    "loops",
+    "thatch",
+    "symmetry_i9",
     "twilio",
     "attio",
     "box",
@@ -201,3 +205,62 @@ def test_run_wizard_passes_authoritative_catalog_to_selector(monkeypatch, tmp_pa
 
     assert wizard.run_wizard(api_url="https://api.example.com", cwd=str(tmp_path)) == 1
     assert captured == {"max_twins": None, "catalog": catalog}
+
+
+@pytest.mark.parametrize(
+    ("twin", "key", "expected"),
+    [
+        ("bivo", "BIVO_API_TOKEN", "bivo_test_token"),
+        ("bivo", "BIVO_TENANT_IDENTIFIER", "bivo_test_tenant"),
+        ("bivo", "BIVO_BASE_URL", ""),
+        ("bivo", "BIVO_API_BASE_URL", ""),
+        ("loops", "LOOPS_API_KEY", "loops_test_key"),
+        ("loops", "LOOPS_API_BASE_URL", ""),
+        ("thatch", "THATCH_API_KEY", "sk_thatch_twin"),
+        ("thatch", "THATCH_API_BASE_URL", ""),
+        ("symmetry_i9", "SYMMETRY_I9_API_KEY", "symmetry_i9_test_key"),
+        ("symmetry_i9", "SYMMETRY_I9_ACCESS_TOKEN", ""),
+        ("symmetry_i9", "SYMMETRY_I9_BASE_URL", ""),
+        ("symmetry_i9", "SYMMETRY_AUTH_BASE_URL", ""),
+    ],
+)
+def test_customer_twin_variables_are_scoped_and_use_runtime_urls(twin, key, expected):
+    assert env.resolve_env_var(key, [twin]) == {"twin": twin, "default_value": expected}
+    assert env.resolve_env_var(key, sorted(EXPECTED_TWINS - {twin})) is None
+
+
+@pytest.mark.parametrize(
+    ("twin", "port", "domains"),
+    [
+        ("bivo", 12155, ["devapi.bivotech.co"]),
+        ("loops", 12154, ["app.loops.so"]),
+        ("thatch", 12157, ["partners.thatchcloud.com", "app.thatch.com"]),
+        (
+            "symmetry_i9",
+            12156,
+            ["api.symmetry.com/i9", "api.symmetry.com/authentication", "symmetry-i9-twin.workbright.com"],
+        ),
+    ],
+)
+def test_customer_catalog_matches_server_routes(twin, port, domains):
+    assert TWIN_CATALOG[twin]["port"] == port
+    assert TWIN_CATALOG[twin]["intercept_domains"] == domains
+
+
+def test_symmetry_fallback_selection_is_api_only(monkeypatch):
+    captured = {}
+
+    class Answer:
+        def ask(self):
+            return ["symmetry_i9"]
+
+    def select(message, *, choices, validate):
+        captured["choices"] = choices
+        return Answer()
+
+    monkeypatch.setattr(prompts.questionary, "checkbox", select)
+    assert prompts.select_twins() == ["symmetry_i9"]
+    choices = captured["choices"]
+    titles = [getattr(c, "title", "") for c in choices]
+    values = [getattr(c, "value", None) for c in choices]
+    assert values.index("symmetry_i9") > titles.index("── API-only Twins ──")
