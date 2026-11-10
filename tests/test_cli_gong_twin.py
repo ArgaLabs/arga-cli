@@ -177,13 +177,18 @@ def test_complete_gong_environment_without_valid_run_id_cannot_rewrite_files(mon
 
 
 @pytest.mark.parametrize("twins", [{"gong": {"env_vars": {}}}, None, {"gong": None}])
-def test_incomplete_gong_environment_keeps_run_handle_for_status_and_teardown(monkeypatch, tmp_path, twins):
+def test_incomplete_gong_environment_keeps_run_handle_for_status_and_teardown(monkeypatch, tmp_path, capsys, twins):
     file_path = tmp_path / ".env"
     file_path.write_text(original_env())
     fake_wizard(monkeypatch, lambda *_args, **_kwargs: {"run_id": "run-live", "status": "ready", "twins": twins})
     assert wizard.run_wizard(api_url="https://api.argalabs.com", cwd=str(tmp_path)) == 1
     saved = session.load_session(str(tmp_path))
     assert saved["run_id"] == "run-live" and saved["api_url"] == "https://api.argalabs.com"
+    captured = capsys.readouterr()
+    output = " ".join((captured.out + captured.err).split())
+    assert "Run run-live is still active" in output
+    assert "arga wizard status" in output and "arga wizard teardown" in output
+    assert "arga login" in output and "unsaved API key" in output
     assert file_path.read_text() == original_env() and not (tmp_path / ".env.arga-backup").exists()
 
 
@@ -265,6 +270,93 @@ def test_shape_fallback_still_supports_unknown_selected_provider_aliases(monkeyp
     changes = env.rewrite_env_files(str(tmp_path), ["slack"])
     assert len(changes) == 1 and changes[0].key == "CUSTOM_SLACK_TOKEN"
     assert changes[0].new_value == TWIN_ENV_MAPPINGS["slack"]["defaults"]["SLACK_BOT_TOKEN"]
+
+
+@pytest.mark.parametrize("returned", [None, "xoxb-custom-scenario"])
+def test_selected_defaultless_alias_uses_its_owners_shape_and_scenario_value(monkeypatch, tmp_path, returned):
+    file_path = tmp_path / ".env"
+    file_path.write_text("SLACK_TOKEN=xoxb-real-token\nGITHUB_TOKEN=xoxb-other-provider\n")
+    accept_env_prompts(monkeypatch, file_path)
+    values = {"SLACK_BOT_TOKEN": returned} if returned else None
+    changes = env.rewrite_env_files(str(tmp_path), ["slack"], env_values=values)
+    expected = returned or TWIN_ENV_MAPPINGS["slack"]["defaults"]["SLACK_BOT_TOKEN"]
+    assert [(change.key, change.twin, change.new_value) for change in changes] == [("SLACK_TOKEN", "slack", expected)]
+    assert "GITHUB_TOKEN=xoxb-other-provider\n" in file_path.read_text()
+
+
+def test_defaultless_alias_cannot_use_another_selected_providers_shape(monkeypatch, tmp_path):
+    file_path = tmp_path / ".env"
+    original = "SLACK_TOKEN=glpat-real-gitlab-token\nGITLAB_BASE_URL=xoxb-not-a-url\n"
+    file_path.write_text(original)
+    accept_env_prompts(monkeypatch, file_path)
+    monkeypatch.setattr(
+        env.questionary, "confirm", lambda *_args, **_kwargs: pytest.fail("Wrong-owner fallback prompted")
+    )
+    assert env.rewrite_env_files(str(tmp_path), ["slack", "gitlab"]) == []
+    assert file_path.read_text() == original
+
+
+def test_already_correct_defaultless_scenario_alias_does_not_revert_to_static_default(monkeypatch, tmp_path):
+    file_path = tmp_path / ".env"
+    original = "SLACK_TOKEN=xoxb-custom-scenario\n"
+    file_path.write_text(original)
+    accept_env_prompts(monkeypatch, file_path)
+    monkeypatch.setattr(env.questionary, "confirm", lambda *_args, **_kwargs: pytest.fail("Correct alias prompted"))
+    assert env.rewrite_env_files(str(tmp_path), ["slack"], env_values={"SLACK_BOT_TOKEN": "xoxb-custom-scenario"}) == []
+    assert file_path.read_text() == original
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("token # [arga-twin: gong]", "token"),
+        ('"token" # [arga-twin: gong]', "token"),
+        ("'token' # [arga-twin: gong]", "token"),
+        ('"literal # [arga-twin: gong]"', "literal # [arga-twin: gong]"),
+        ("'literal # [arga-twin: gong]'", "literal # [arga-twin: gong]"),
+        ('"literal # [arga-twin: gong]', '"literal # [arga-twin: gong]'),
+        ("token# [arga-twin: gong]", "token# [arga-twin: gong]"),
+        ("token # [arga-twin: gong] extra", "token # [arga-twin: gong] extra"),
+    ],
+)
+def test_twin_marker_parser_strips_only_generated_unquoted_comment_suffix(tmp_path, raw, expected):
+    file_path = tmp_path / ".env"
+    file_path.write_text("VALUE=" + raw + "\n")
+    entry = env.parse_env_file(str(file_path))[0]
+    assert entry.value == expected and entry.raw == "VALUE=" + raw
+
+
+def test_second_identical_gong_rewrite_does_not_prompt_or_replace_original_backup(monkeypatch, tmp_path):
+    file_path = tmp_path / ".env"
+    original = original_env()
+    file_path.write_text(original)
+    accept_env_prompts(monkeypatch, file_path)
+    assert env.rewrite_env_files(str(tmp_path), ["gong"], env_values=RETURNED_ENV)
+    rewritten = file_path.read_text()
+    assert "# [arga-twin: gong]" in rewritten
+    monkeypatch.setattr(env.questionary, "confirm", lambda *_args, **_kwargs: pytest.fail("Identical rewrite prompted"))
+    assert env.rewrite_env_files(str(tmp_path), ["gong"], env_values=RETURNED_ENV) == []
+    assert file_path.read_text() == rewritten
+    assert (tmp_path / ".env.arga-backup").read_text() == original
+
+
+@pytest.mark.parametrize("credential", ["synthetic'credential", 'synthetic"credential', "synthetic-credential\\"])
+def test_unquoted_internal_quotes_and_backslash_roundtrip_through_apply_parse_repeat(monkeypatch, tmp_path, credential):
+    file_path = tmp_path / ".env"
+    original = "SLACK_BOT_TOKEN=original-test-token\n"
+    file_path.write_text(original)
+    entries = env.parse_env_file(str(file_path))
+    env.apply_env_changes(
+        str(file_path), entries, [env.EnvChange("SLACK_BOT_TOKEN", "original-test-token", credential, "slack")]
+    )
+    rewritten = file_path.read_text()
+    assert env.parse_env_file(str(file_path))[0].value == credential
+    accept_env_prompts(monkeypatch, file_path)
+    monkeypatch.setattr(
+        env.questionary, "confirm", lambda *_args, **_kwargs: pytest.fail("Roundtrip credential prompted")
+    )
+    assert env.rewrite_env_files(str(tmp_path), ["slack"], env_values={"SLACK_BOT_TOKEN": credential}) == []
+    assert file_path.read_text() == rewritten and (tmp_path / ".env.arga-backup").read_text() == original
 
 
 @pytest.mark.parametrize(

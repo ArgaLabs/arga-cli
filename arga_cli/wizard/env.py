@@ -58,6 +58,26 @@ class EnvChange:
     twin: str
 
 
+def _strip_twin_marker(value: str) -> str:
+    marker = re.search(r"\s+#\s*\[arga-twin:\s*[A-Za-z0-9_-]+\]\s*$", value)
+    if marker is None:
+        return value
+    # parse_env_file only recognizes quoting at the beginning of a value.
+    # Quotes and backslashes in an initially unquoted value remain literal.
+    if not value.startswith(("'", '"')):
+        return value[: marker.start()].rstrip()
+    quote = value[0]
+    escaped = False
+    for character in value[1 : marker.start()]:
+        if escaped:
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == quote:
+            return value[: marker.start()].rstrip()
+    return value
+
+
 def parse_env_file(file_path: str) -> list[EnvEntry]:
     """Parse a .env file into structured entries, preserving comments and blanks."""
     content = Path(file_path).read_text()
@@ -72,7 +92,7 @@ def parse_env_file(file_path: str) -> list[EnvEntry]:
             entries.append(EnvEntry(raw=line))
             continue
         key = trimmed[:eq_idx].strip()
-        value = trimmed[eq_idx + 1 :].strip()
+        value = _strip_twin_marker(trimmed[eq_idx + 1 :].strip())
         # Strip surrounding quotes
         if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
             value = value[1:-1]
@@ -179,7 +199,24 @@ def detect_shape_matches(
             continue
         if entry.key in already_matched_keys:
             continue
-        shape = match_value_shape(entry.value, selected_twins)
+        owners = {
+            name
+            for name, mapping in TWIN_ENV_MAPPINGS.items()
+            if entry.key in mapping["token_vars"] + mapping["url_vars"] + mapping.get("secret_vars", [])
+        }
+        # A registered alias may only use its selected owner's credential
+        # shapes. Unknown aliases retain the original heuristic behavior.
+        eligible = (
+            [
+                name
+                for name in selected_twins
+                if name in owners
+                and entry.key in TWIN_ENV_MAPPINGS[name]["token_vars"] + TWIN_ENV_MAPPINGS[name].get("secret_vars", [])
+            ]
+            if owners
+            else selected_twins
+        )
+        shape = match_value_shape(entry.value, eligible)
         if shape:
             matches.append(ShapeMatch(key=entry.key, value=entry.value, shape=shape))
     return matches
@@ -247,13 +284,14 @@ def rewrite_env_files(
                 )
 
         # Shape-based fallback detection
-        # Recognized names keep their provider ownership even when their
-        # values are already correct or the provider was not selected.
+        # A concrete name-based value is authoritative even if already correct.
+        # Selected aliases without a value may use their owner's shape fallback.
         name_matched_keys = {
-            key
-            for mapping in TWIN_ENV_MAPPINGS.values()
-            for category in ("token_vars", "url_vars", "secret_vars")
-            for key in mapping.get(category, [])
+            entry.key
+            for entry in entries
+            if entry.key
+            and (resolved := resolve_env_var(entry.key, selected_twins, env_values=env_values))
+            and resolved["default_value"]
         }
         shape_matches: list[ShapeMatch] = []
         shape_changes: list[EnvChange] = []
@@ -262,16 +300,24 @@ def rewrite_env_files(
         if shape_detect:
             shape_matches = detect_shape_matches(entries, selected_twins, name_matched_keys)
             for m in shape_matches:
-                if m.shape.get("default_value") and m.value != m.shape["default_value"]:
+                default = m.shape.get("default_value", "")
+                # A scenario may replace the provider's canonical credential.
+                # Carry that same value to aliases of its known token shape.
+                for key, configured in TWIN_ENV_MAPPINGS[m.shape["twin"]]["defaults"].items():
+                    returned = (env_values or {}).get(key)
+                    if default and configured == default and returned:
+                        default = returned
+                        break
+                if default and m.value != default:
                     shape_changes.append(
                         EnvChange(
                             key=m.key,
                             old_value=m.value,
-                            new_value=m.shape["default_value"],
+                            new_value=default,
                             twin=m.shape["twin"],
                         )
                     )
-                elif not m.shape.get("default_value"):
+                elif not default:
                     shape_warnings.append(m)
 
         if not name_changes and not shape_changes and not shape_warnings:

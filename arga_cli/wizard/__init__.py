@@ -101,6 +101,10 @@ def run_wizard(
             env_values = provisioned_env_values(status, selected)
         except ValueError as exc:
             error(str(exc))
+            dim(f"  Run {status['run_id']} is still active. Use `arga wizard status` or `arga wizard teardown`.")
+            dim(
+                "  These commands use your standard CLI login; run `arga login` first if setup used an unsaved API key."
+            )
             return 1
         env_changes = rewrite_env_files(cwd, selected, shape_detect=shape_detect, env_values=env_values)
 
