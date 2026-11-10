@@ -246,15 +246,33 @@ class ApiClient:
             params["twin"] = twin
         if tag:
             params["tag"] = tag
-        response = self._client.get(
-            f"{self._api_url}/scenarios",
-            params=params,
-            headers=self._auth_headers(),
-        )
-        data = self._parse_json(response, "Failed to list scenarios")
-        if not isinstance(data, list):
-            raise CliError("Unexpected response from /scenarios")
-        return data
+        # Older API deployments return the entire list and omit pagination headers.
+        # New deployments advertise the applied limit so this client can ship first.
+        page_size = 100
+        offset = 0
+        scenarios: list[dict[str, Any]] = []
+        while True:
+            response = self._client.get(
+                f"{self._api_url}/scenarios",
+                params={**params, "limit": str(page_size), "offset": str(offset)},
+                headers=self._auth_headers(),
+            )
+            data = self._parse_json(response, "Failed to list scenarios")
+            if not isinstance(data, list):
+                raise CliError("Unexpected response from /scenarios")
+            scenarios.extend(data)
+            applied_limit = response.headers.get("X-Pagination-Limit")
+            if applied_limit is None:
+                return scenarios
+            try:
+                applied_page_size = int(applied_limit)
+            except ValueError as exc:
+                raise CliError("Invalid pagination limit from /scenarios") from exc
+            if applied_page_size < 1 or applied_page_size > page_size or len(data) > applied_page_size:
+                raise CliError("Invalid pagination limit from /scenarios")
+            if len(data) < applied_page_size:
+                return scenarios
+            offset += len(data)
 
     def list_scenario_presets(
         self,
