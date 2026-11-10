@@ -23,6 +23,7 @@ EXPECTED_TWINS = {
     "github",
     "gitlab",
     "gmail",
+    "gong",
     "google_calendar",
     "google_docs",
     "google_drive",

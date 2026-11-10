@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from arga_cli.wizard.constants import DASHBOARD_BASE_URL
-from arga_cli.wizard.env import rewrite_env_files
+from arga_cli.wizard.env import provisioned_env_values, rewrite_env_files
 from arga_cli.wizard.output import console, dim, error, green, header, yellow
 from arga_cli.wizard.prompts import describe_scenario, prompt_api_key, prompt_save_scenario, select_twins
 from arga_cli.wizard.provision import provision_twins, seed_and_report
-from arga_cli.wizard.summary import print_summary
+from arga_cli.wizard.summary import print_summary, save_session_state
 
 
 def run_wizard(
@@ -63,8 +63,10 @@ def run_wizard(
     # Step 3: Describe desired twin state (optional)
     scenario_prompt = describe_scenario(selected)
 
-    # Step 4: .env rewriting
-    env_changes = rewrite_env_files(cwd, selected, shape_detect=shape_detect)
+    # Gong API/MCP/SCIM hosts are assigned during provisioning. Apply the
+    # returned URLs and scenario credentials together, after they are known.
+    defer_env_rewrite = "gong" in selected
+    env_changes = [] if defer_env_rewrite else rewrite_env_files(cwd, selected, shape_detect=shape_detect)
 
     # Step 5: Provision
     if ttl_minutes is not None:
@@ -89,6 +91,18 @@ def run_wizard(
             dim("  No local .env files were changed.")
         dim("  Use `arga runs logs <run-id>` for worker and runtime logs.\n")
         return 1
+
+    if defer_env_rewrite:
+        if not isinstance(status, dict) or not isinstance(status.get("run_id"), str) or not status["run_id"].strip():
+            error("Gong provisioning did not return a valid run ID; no .env files changed.")
+            return 1
+        save_session_state(cwd, status, api_url, resolved_key)
+        try:
+            env_values = provisioned_env_values(status, selected)
+        except ValueError as exc:
+            error(str(exc))
+            return 1
+        env_changes = rewrite_env_files(cwd, selected, shape_detect=shape_detect, env_values=env_values)
 
     # Step 6: Quickstart seeding
     try:

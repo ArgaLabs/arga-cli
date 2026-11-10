@@ -103,7 +103,7 @@ def apply_env_changes(file_path: str, entries: list[EnvEntry], changes: list[Env
 # ---------------------------------------------------------------------------
 
 
-def resolve_env_var(key: str, selected_twins: list[str]) -> dict | None:
+def resolve_env_var(key: str, selected_twins: list[str], *, env_values: dict[str, str] | None = None) -> dict | None:
     """For a given env var key, find which twin it belongs to and what the default is."""
     for twin_name in selected_twins:
         mapping = TWIN_ENV_MAPPINGS.get(twin_name)
@@ -111,9 +111,35 @@ def resolve_env_var(key: str, selected_twins: list[str]) -> dict | None:
             continue
         all_vars = mapping["token_vars"] + mapping["url_vars"] + mapping.get("secret_vars", [])
         if key in all_vars:
-            default_value = mapping["defaults"].get(key, "")
+            default_value = (env_values or {}).get(key, mapping["defaults"].get(key, ""))
             return {"twin": twin_name, "default_value": default_value}
     return None
+
+
+def provisioned_env_values(status: dict, selected_twins: list[str]) -> dict[str, str]:
+    """Use each provider's returned values only for its registered variables."""
+    if not isinstance(status, dict) or not isinstance(status.get("twins"), dict):
+        raise ValueError("Provision response must contain a twin map; no .env files changed.")
+    values = {}
+    for name in selected_twins:
+        mapping = TWIN_ENV_MAPPINGS.get(name, {})
+        keys = mapping.get("token_vars", []) + mapping.get("url_vars", []) + mapping.get("secret_vars", [])
+        info = status["twins"].get(name, {})
+        if not isinstance(info, dict) or not isinstance(info.get("env_vars", {}), dict):
+            raise ValueError("Provisioned twin environment must be an object; no .env files changed.")
+        returned = info.get("env_vars", {})
+        own_values = {key: returned[key] for key in keys if isinstance(returned.get(key), str) and returned[key]}
+        if name == "gong" and (status.get("status") != "ready" or set(own_values) != set(keys)):
+            raise ValueError(
+                "Gong requires a ready provision with complete returned environment values; no .env files changed."
+            )
+        for key, value in own_values.items():
+            if not re.fullmatch(r"[A-Za-z0-9_./:@?&=%+,~-]+", value):
+                raise ValueError(
+                    f"Cannot safely write returned {key} without dotenv quoting; configure it manually. No .env files changed."
+                )
+        values.update(own_values)
+    return values
 
 
 # ---------------------------------------------------------------------------
@@ -169,8 +195,11 @@ def rewrite_env_files(
     selected_twins: list[str],
     *,
     shape_detect: bool = True,
+    env_values: dict[str, str] | None = None,
 ) -> list[EnvChange]:
     """Detect env files, preview changes, and apply if confirmed."""
+    if "gong" in selected_twins:
+        provisioned_env_values({"status": "ready", "twins": {"gong": {"env_vars": env_values}}}, ["gong"])
     env_files = detect_env_files(cwd)
 
     if not env_files:
@@ -206,7 +235,7 @@ def rewrite_env_files(
         for entry in entries:
             if not entry.key or entry.value is None:
                 continue
-            resolved = resolve_env_var(entry.key, selected_twins)
+            resolved = resolve_env_var(entry.key, selected_twins, env_values=env_values)
             if resolved and resolved["default_value"] and entry.value != resolved["default_value"]:
                 name_changes.append(
                     EnvChange(
@@ -218,7 +247,14 @@ def rewrite_env_files(
                 )
 
         # Shape-based fallback detection
-        name_matched_keys = {c.key for c in name_changes}
+        # Recognized names keep their provider ownership even when their
+        # values are already correct or the provider was not selected.
+        name_matched_keys = {
+            key
+            for mapping in TWIN_ENV_MAPPINGS.values()
+            for category in ("token_vars", "url_vars", "secret_vars")
+            for key in mapping.get(category, [])
+        }
         shape_matches: list[ShapeMatch] = []
         shape_changes: list[EnvChange] = []
         shape_warnings: list[ShapeMatch] = []
