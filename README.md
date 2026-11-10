@@ -251,6 +251,7 @@ arga test-runner runs rerun <run_id> --sandbox-id <sandbox_id>
 arga test-runner runs message <run_id> "Use test@example.com"
 ```
 
+- `scenarios list` follows API pagination automatically, including when using `--include-presets`, `--twin`, `--tag`, or `--json`.
 - `scenarios` supports list/presets/get/create/import/export/update/delete for twin seed scenarios. Human-readable
   list/create/import/update output includes the server-recorded creation time; JSON output preserves `created_at`.
 - `arga test-runner scenarios presets` lists built-in presets from the public presets API without requiring login.
