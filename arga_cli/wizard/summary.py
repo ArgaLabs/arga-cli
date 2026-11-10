@@ -9,10 +9,29 @@ from arga_cli.wizard.output import console, dim, print_summary_box
 from arga_cli.wizard.session import save_session
 
 
+def save_session_state(cwd: str, status: dict, api_url: str, scenario_id: str | None = None) -> None:
+    """Keep the provision handle before a later interactive step can interrupt."""
+    twins = status.get("twins")
+    twins = twins if isinstance(twins, dict) else {}
+    session = {
+        "run_id": status["run_id"],
+        "created_at": datetime.now().isoformat(),
+        "expires_at": status.get("expires_at"),
+        "api_url": api_url,
+        "twins": {
+            name: {"base_url": info.get("base_url", ""), "admin_url": info.get("admin_url", "")}
+            for name, info in twins.items()
+            if isinstance(info, dict)
+        },
+    }
+    if scenario_id is not None:
+        session["scenario_id"] = scenario_id
+    save_session(cwd, session)
+
+
 def print_summary(cwd: str, status: dict, api_url: str, api_key: str, scenario_id: str | None = None) -> None:
     """Print the final summary and write the session state file."""
     dashboard_url = status.get("dashboard_url") or f"{DASHBOARD_BASE_URL}/runs/{status['run_id']}"
-    proxy_token = status.get("proxy_token")
 
     lines = [
         "[bold green]Arga Twins \u2014 Ready![/bold green]",
@@ -42,20 +61,5 @@ def print_summary(cwd: str, status: dict, api_url: str, api_key: str, scenario_i
 
     console.print()
 
-    session = {
-        "run_id": status["run_id"],
-        "created_at": datetime.now().isoformat(),
-        "expires_at": status.get("expires_at"),
-        "api_url": api_url,
-        "api_key": api_key,
-        "proxy_token": proxy_token,
-        "twins": {
-            name: {"base_url": info.get("base_url", ""), "admin_url": info.get("admin_url", "")}
-            for name, info in status.get("twins", {}).items()
-        },
-    }
-    if scenario_id is not None:
-        session["scenario_id"] = scenario_id
-
-    save_session(cwd, session)
+    save_session_state(cwd, status, api_url, scenario_id)
     dim(f"Session saved to {SESSION_FILE}")

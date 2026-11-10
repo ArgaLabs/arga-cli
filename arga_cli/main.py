@@ -3333,16 +3333,36 @@ def run_wizard_teardown(_args: argparse.Namespace) -> int:
 
 
 def run_wizard_env(args: argparse.Namespace) -> int:
-    from arga_cli.wizard.env import rewrite_env_files
+    from arga_cli.wizard.env import provisioned_env_values, rewrite_env_files
     from arga_cli.wizard.prompts import select_twins
 
     selected = select_twins()
     if not selected:
         return 1
+    env_kwargs = {}
+    if "gong" in selected:
+        from arga_cli.wizard.session import load_session
+
+        try:
+            session = load_session(os.getcwd())
+            if not isinstance(session, dict) or any(
+                not isinstance(session.get(key), str) or not session[key].strip()
+                for key in ("api_url", "api_key", "run_id")
+            ):
+                raise ValueError("Gong environment rewriting requires a valid session. Run `arga wizard` first.")
+            client = ApiClient(session["api_url"], api_key=session["api_key"])
+            try:
+                status = client.get_twin_provision_status(session["run_id"])
+            finally:
+                client.close()
+            env_kwargs["env_values"] = provisioned_env_values(status, selected)
+        except (FileNotFoundError, ValueError) as exc:
+            raise CliError(str(exc)) from exc
     rewrite_env_files(
         os.getcwd(),
         selected,
         shape_detect=not getattr(args, "no_shape_detect", False),
+        **env_kwargs,
     )
     return 0
 

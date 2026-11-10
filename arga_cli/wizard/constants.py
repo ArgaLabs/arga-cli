@@ -19,6 +19,18 @@ ENV_FILE_NAMES = [
 # ---------------------------------------------------------------------------
 
 TWIN_CATALOG: dict[str, dict] = {
+    "gong": {
+        "label": "Gong",
+        "port": 12162,
+        "intercept_domains": [
+            "api.gong.io",
+            "company-twin.api.gong.io",
+            "app.gong.io",
+            "mcp.gong.io",
+            "provisioning.gong.io",
+        ],
+        "show_in_ui": True,
+    },
     "bivo": {
         "label": "Bivo",
         "port": 12155,
@@ -324,6 +336,19 @@ TWIN_CATALOG: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 TWIN_ENV_MAPPINGS: dict[str, dict] = {
+    "gong": {
+        "token_vars": ["GONG_ACCESS_TOKEN", "GONG_ACCESS_KEY", "GONG_CLIENT_ID"],
+        "url_vars": ["GONG_BASE_URL", "GONG_API_BASE_URL", "GONG_AUTH_BASE_URL", "GONG_MCP_URL", "GONG_SCIM_BASE_URL"],
+        "secret_vars": ["GONG_ACCESS_KEY_SECRET", "GONG_ACCESS_SECRET", "GONG_CLIENT_SECRET"],
+        "defaults": {
+            "GONG_ACCESS_TOKEN": "gong-twin-access-token",
+            "GONG_ACCESS_KEY": "gong-twin-access-key",
+            "GONG_ACCESS_KEY_SECRET": "gong-twin-access-secret",
+            "GONG_ACCESS_SECRET": "gong-twin-access-secret",
+            "GONG_CLIENT_ID": "gong-twin-client-id",
+            "GONG_CLIENT_SECRET": "gong-twin-client-secret",
+        },
+    },
     "bivo": {
         "token_vars": ["BIVO_TENANT_IDENTIFIER"],
         "secret_vars": ["BIVO_API_TOKEN"],
@@ -939,6 +964,11 @@ TOKEN_SHAPES: list[dict] = [
 # ---------------------------------------------------------------------------
 
 QUICKSTART_SUMMARIES: dict[str, list[str]] = {
+    "gong": [
+        "Gong REST, SCIM, OAuth, and MCP endpoints ready",
+        "Conversation workspace starts without demo calls",
+        "Access token: gong-twin-access-token",
+    ],
     "bivo": [
         "Bivo accounts, ACH, wire, FX, card and coin API simulation",
         "Use Authorization: Bearer bivo_test_token and X-Tenant-Identifier: bivo_test_tenant",
