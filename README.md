@@ -49,6 +49,14 @@ Remove the saved device credential:
 arga logout
 ```
 
+The wizard's `.arga-session.json` stores run metadata and a reference to your
+normal CLI login, without copying your API key or proxy token into the project.
+Status, reset, extend, teardown, and environment updates use the current login,
+including after credential rotation. If setup used an API key without saving a
+normal CLI login, the run handle is still saved; run `arga login` with access to
+that run before resuming it. Existing sessions with embedded credentials remain
+readable, and new session writes omit those credentials.
+
 Install MCP configuration for detected agents:
 
 ```bash

@@ -9,7 +9,7 @@ from arga_cli.wizard.output import console, dim, print_summary_box
 from arga_cli.wizard.session import save_session
 
 
-def save_session_state(cwd: str, status: dict, api_url: str, api_key: str, scenario_id: str | None = None) -> None:
+def save_session_state(cwd: str, status: dict, api_url: str, scenario_id: str | None = None) -> None:
     """Keep the provision handle before a later interactive step can interrupt."""
     twins = status.get("twins")
     twins = twins if isinstance(twins, dict) else {}
@@ -18,8 +18,6 @@ def save_session_state(cwd: str, status: dict, api_url: str, api_key: str, scena
         "created_at": datetime.now().isoformat(),
         "expires_at": status.get("expires_at"),
         "api_url": api_url,
-        "api_key": api_key,
-        "proxy_token": status.get("proxy_token"),
         "twins": {
             name: {"base_url": info.get("base_url", ""), "admin_url": info.get("admin_url", "")}
             for name, info in twins.items()
@@ -63,5 +61,5 @@ def print_summary(cwd: str, status: dict, api_url: str, api_key: str, scenario_i
 
     console.print()
 
-    save_session_state(cwd, status, api_url, api_key, scenario_id)
+    save_session_state(cwd, status, api_url, scenario_id)
     dim(f"Session saved to {SESSION_FILE}")

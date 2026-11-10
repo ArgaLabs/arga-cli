@@ -96,7 +96,7 @@ def run_wizard(
         if not isinstance(status, dict) or not isinstance(status.get("run_id"), str) or not status["run_id"].strip():
             error("Gong provisioning did not return a valid run ID; no .env files changed.")
             return 1
-        save_session_state(cwd, status, api_url, resolved_key)
+        save_session_state(cwd, status, api_url)
         try:
             env_values = provisioned_env_values(status, selected)
         except ValueError as exc:

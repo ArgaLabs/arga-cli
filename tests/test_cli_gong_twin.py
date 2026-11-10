@@ -53,7 +53,8 @@ def fake_wizard(monkeypatch, provision):
             return [{"name": "gong", "label": "Gong", "kind": "frontend"}]
 
     monkeypatch.setattr(main, "ApiClient", Client)
-    monkeypatch.setattr(wizard, "prompt_api_key", lambda *_args: "arga-test")
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga-test")
+    monkeypatch.setattr(wizard, "prompt_api_key", lambda _url, supplied: supplied or "arga-test")
     monkeypatch.setattr(wizard, "select_twins", lambda *_args, **_kwargs: ["gong"])
     monkeypatch.setattr(wizard, "describe_scenario", lambda *_args: None)
     monkeypatch.setattr(wizard, "provision_twins", provision)
@@ -134,6 +135,28 @@ def test_interrupted_gong_env_prompt_keeps_session_for_status_and_teardown(monke
         wizard.run_wizard(api_url="https://api.argalabs.com", cwd=str(tmp_path))
     assert session.load_session(str(tmp_path))["run_id"] == "run-gong"
     assert file_path.read_text() == original_env() and not (tmp_path / ".env.arga-backup").exists()
+
+
+def test_flag_only_interrupted_setup_retains_handle_without_saving_supplied_credential(monkeypatch, tmp_path):
+    fake_wizard(monkeypatch, lambda *_args, **_kwargs: copy.deepcopy(READY_STATUS))
+
+    def missing_auth():
+        raise main.NotAuthenticatedError("Run `arga login`.")
+
+    def cancelled(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(main, "load_api_key", missing_auth)
+    monkeypatch.setattr(wizard, "rewrite_env_files", cancelled)
+    with pytest.raises(KeyboardInterrupt):
+        wizard.run_wizard(api_url="https://api.argalabs.com", api_key="flag-only-test-key", cwd=str(tmp_path))
+    metadata = (tmp_path / ".arga-session.json").read_text()
+    assert "flag-only-test-key" not in metadata and "api_key" not in metadata
+    with pytest.raises(main.NotAuthenticatedError, match="arga login"):
+        session.load_session(str(tmp_path))
+    monkeypatch.setattr(main, "load_api_key", lambda: "normal-login-test-key")
+    assert session.load_session(str(tmp_path))["run_id"] == "run-gong"
+    assert (tmp_path / ".arga-session.json").read_text() == metadata
 
 
 @pytest.mark.parametrize("run_id", [None, "", "   ", 42, [], {}])
@@ -320,6 +343,7 @@ def test_wizard_env_uses_saved_session_current_values_and_closes_client(monkeypa
             calls.append("close")
 
     monkeypatch.setattr(main, "ApiClient", Client)
+    monkeypatch.setattr(main, "load_api_key", lambda: "arga-test")
     monkeypatch.setattr(prompts, "select_twins", lambda: ["gong"])
     assert main.run_wizard_env(argparse.Namespace(no_shape_detect=True)) == 0
     assert calls == ["run-gong", "close"]
