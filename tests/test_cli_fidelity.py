@@ -177,5 +177,7 @@ def test_api_marks_retryable_responses_and_preserves_retry_after(status):
         with pytest.raises(main.RetryableApiError) as error:
             client.fidelity_request("GET", "/id", timeout=1)
         assert error.value.retry_after == 3
+        assert "unavailable" in str(error.value)
+        assert "idempotency key" not in str(error.value)
     finally:
         client.close()

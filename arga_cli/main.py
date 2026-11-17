@@ -166,14 +166,14 @@ class ApiClient:
             json=payload,
             **({"timeout": timeout} if timeout is not None else {}),
         )
-        if response.status_code == 429 or response.status_code >= 500:
-            delay = response.headers.get("Retry-After", "")
-            retry_after = int(delay) if delay.isdecimal() and len(delay) <= 5 else 0
-            raise RetryableApiError(
-                "Fidelity service temporarily unavailable; retry with the same report or idempotency key",
-                retry_after=retry_after,
-            )
-        return self._parse_json(response, "Fidelity gap request failed")
+        try:
+            return self._parse_json(response, "Fidelity gap request failed")
+        except CliError as exc:
+            if response.status_code == 429 or response.status_code >= 500:
+                delay = response.headers.get("Retry-After", "")
+                retry_after = int(delay) if delay.isdecimal() and len(delay) <= 5 else 0
+                raise RetryableApiError(str(exc), retry_after=retry_after) from exc
+            raise
 
     def __init__(self, api_url: str, api_key: str | None = None) -> None:
         self._api_url = api_url.rstrip("/")
