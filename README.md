@@ -484,3 +484,37 @@ The CLI stores its local auth state in:
 ```
 
 That file contains the saved API key plus device metadata returned during `arga login`.
+
+## Fidelity gap reports
+
+Submit one connector's report as UTF-8 Markdown (up to 256 KiB), using your existing
+Arga login. The pilot currently supports `linear`, `atlassian`, `microsoft`, and
+`google_workspace` when enabled for your account.
+
+```sh
+arga fidelity-gaps submit report.md --connector linear --json
+arga fidelity-gaps get <report-id> --json
+arga fidelity-gaps wait <report-id> --until deployed --timeout 7200 --json
+arga fidelity-gaps list --json
+```
+
+Include expected and observed behavior, exact API/MCP reproductions, deterministic
+seed configuration, and provider contract captures where relevant. Keep credentials
+out of reports. Submission returns immediately; work continues after disconnect.
+Retrying the same file/context reuses the submission. Use `--idempotency-key` to
+set a caller-owned retry key, or `--parent <report-id>` for another report round.
+
+`awaiting_review` means candidate verification, CI and comment gates passed. It does
+not mean deployed. `deployed` includes the merged revision and verified image
+identities from a fresh Twin Run. Start a new Twin Run before rerunning evals; existing
+runs retain their previous images. Record the result with:
+
+```sh
+arga fidelity-gaps verify <report-id> --revision <deployed-revision> --outcome passed --json
+arga fidelity-gaps submit round-2.md --connector linear --parent <report-id> --json
+```
+
+`wait` prints one final JSON object with `--json`. Exit 0 means the requested milestone
+was reached, 1 means the job needs information/engineering attention or another
+request failed, and 2 means the local polling timeout expired. Timeout never cancels
+remote work. This feature requires the fidelity repair backend to be enabled.

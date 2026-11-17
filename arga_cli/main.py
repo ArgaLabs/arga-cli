@@ -145,11 +145,36 @@ class CliError(Exception):
     """Base CLI error."""
 
 
+class RetryableApiError(CliError):
+    def __init__(self, message: str, *, retry_after: float = 0) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class NotAuthenticatedError(CliError):
     """Raised when no local API key is available."""
 
 
 class ApiClient:
+    def fidelity_request(
+        self, method: str, path: str, payload: dict | None = None, *, timeout: float | None = None
+    ) -> dict:
+        response = self._client.request(
+            method,
+            f"{self._api_url}/fidelity-gaps{path}",
+            headers=self._auth_headers(),
+            json=payload,
+            **({"timeout": timeout} if timeout is not None else {}),
+        )
+        try:
+            return self._parse_json(response, "Fidelity gap request failed")
+        except CliError as exc:
+            if response.status_code == 429 or response.status_code >= 500:
+                delay = response.headers.get("Retry-After", "")
+                retry_after = int(delay) if delay.isdecimal() and len(delay) <= 5 else 0
+                raise RetryableApiError(str(exc), retry_after=retry_after) from exc
+            raise
+
     def __init__(self, api_url: str, api_key: str | None = None) -> None:
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
@@ -3758,6 +3783,9 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {_cli_version()}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    from arga_cli.fidelity import add_parser as add_fidelity_parser
+
+    add_fidelity_parser(subparsers, DEFAULT_API_URL)
 
     login_parser = subparsers.add_parser("login", help="Authenticate the CLI")
     login_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Arga API base URL")
