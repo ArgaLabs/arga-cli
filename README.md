@@ -484,7 +484,8 @@ The CLI stores its local auth state in:
 ```
 
 That file contains the saved API key plus device metadata returned during `arga login`.
-# Fidelity gap reports
+
+## Fidelity gap reports
 
 Submit one connector's report as UTF-8 Markdown (up to 256 KiB), using your existing
 Arga login. The pilot currently supports `linear`, `atlassian`, `microsoft`, and

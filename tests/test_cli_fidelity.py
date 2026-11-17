@@ -1,9 +1,10 @@
 import json
 import uuid
 
+import httpx
 import pytest
 
-from arga_cli import main
+from arga_cli import fidelity, main
 
 
 @pytest.fixture
@@ -53,7 +54,7 @@ def test_failed_wait_outputs_structured_state_and_returns_nonzero(monkeypatch, c
         def close(self):
             pass
 
-        def fidelity_request(self, *_args):
+        def fidelity_request(self, *_args, **_kwargs):
             return {
                 "id": "id",
                 "connector": "linear",
@@ -76,7 +77,7 @@ def test_wait_reached_milestone_survives_later_customer_failure(monkeypatch):
         def close(self):
             pass
 
-        def fidelity_request(self, *_args):
+        def fidelity_request(self, *_args, **_kwargs):
             return {
                 "id": "id",
                 "connector": "linear",
@@ -97,3 +98,84 @@ def test_invalid_file_is_rejected_before_upload(client, tmp_path):
     with pytest.raises(main.CliError, match="UTF-8"):
         args.func(args)
     assert client == ["closed"]
+
+
+def test_wait_recovers_transient_failures_and_honors_short_interval_without_hint(monkeypatch, capsys):
+    clock = {"now": 0.0}
+    sleeps, timeouts = [], []
+    states = [
+        main.RetryableApiError("temporary"),
+        httpx.ConnectError("temporary"),
+        {"id": "id", "connector": "linear", "status": "deployed"},
+    ]
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def close(self):
+            pass
+
+        def fidelity_request(self, *_args, timeout=None):
+            timeouts.append(timeout)
+            item = states.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(main, "ApiClient", Client)
+    monkeypatch.setattr(main, "load_api_key", lambda: "fixture")
+    monkeypatch.setattr(fidelity.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(fidelity.time, "sleep", sleep)
+    args = main.build_parser().parse_args(
+        ["fidelity-gaps", "wait", str(uuid.uuid4()), "--poll-interval", "0.25", "--timeout", "2", "--json"]
+    )
+    assert args.func(args) == 0
+    assert sleeps == [0.25, 0.25]
+    assert all(timeout <= 2 for timeout in timeouts)
+    assert json.loads(capsys.readouterr().out)["status"] == "deployed"
+
+
+def test_wait_exhaustion_is_local_timeout_with_unknown_remote_state(monkeypatch, capsys):
+    clock = {"now": 0.0}
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def close(self):
+            pass
+
+        def fidelity_request(self, *_args, **_kwargs):
+            raise main.RetryableApiError("temporary", retry_after=10)
+
+    monkeypatch.setattr(main, "ApiClient", Client)
+    monkeypatch.setattr(main, "load_api_key", lambda: "fixture")
+    monkeypatch.setattr(fidelity.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(fidelity.time, "sleep", lambda seconds: clock.update(now=clock["now"] + seconds))
+    args = main.build_parser().parse_args(["fidelity-gaps", "wait", str(uuid.uuid4()), "--timeout", "2", "--json"])
+    assert args.func(args) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["poll_status"] == "timed_out" and result["status"] == "unknown"
+    assert clock["now"] == 2
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_api_marks_retryable_responses_and_preserves_retry_after(status):
+    client = main.ApiClient("https://api.test", "fixture")
+    client._client.close()
+    client._client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(status, json={"detail": "unavailable"}, headers={"Retry-After": "3"})
+        )
+    )
+    try:
+        with pytest.raises(main.RetryableApiError) as error:
+            client.fidelity_request("GET", "/id", timeout=1)
+        assert error.value.retry_after == 3
+    finally:
+        client.close()
