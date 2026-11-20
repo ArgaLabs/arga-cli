@@ -8,6 +8,7 @@ import json
 import math
 import time
 import uuid
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -72,7 +73,11 @@ def run(args) -> int:
 
     client = ApiClient(args.api_url, api_key=load_api_key())
     try:
-        command = args.fidelity_command
+        command = "get" if args.fidelity_command == "status" else args.fidelity_command
+        request = partial(
+            client.fidelity_request,
+            invocation_headers={"X-Arga-CLI-Command": command, "X-Arga-CLI-Invocation-ID": str(uuid.uuid4())},
+        )
         if command == "submit":
             try:
                 if args.file.suffix.lower() != ".md" or args.file.stat().st_size > MAX_REPORT_BYTES:
@@ -91,11 +96,11 @@ def run(args) -> int:
             payload["idempotency_key"] = (
                 args.idempotency_key or hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
             )
-            result = client.fidelity_request("POST", "", payload)
+            result = request("POST", "", payload)
         elif command == "list":
-            result = client.fidelity_request("GET", f"?limit={args.limit}")
+            result = request("GET", f"?limit={args.limit}")
         elif command == "verify":
-            result = client.fidelity_request(
+            result = request(
                 "POST",
                 f"/{args.id}/verification",
                 {
@@ -118,7 +123,7 @@ def run(args) -> int:
                     return 2
                 retry_after = 0
                 try:
-                    result = client.fidelity_request("GET", f"/{args.id}", timeout=min(remaining, 60))
+                    result = request("GET", f"/{args.id}", timeout=min(remaining, 60))
                 except (RetryableApiError, httpx.TransportError) as exc:
                     retry_after = getattr(exc, "retry_after", 0)
                 else:
@@ -133,7 +138,7 @@ def run(args) -> int:
                     hint = result.get("poll_after_seconds", args.poll_interval)
                     time.sleep(min(max(args.poll_interval, hint, retry_after), remaining))
         else:
-            result = client.fidelity_request("GET", f"/{args.id}")
+            result = request("GET", f"/{args.id}")
         _print(result, args.json)
         return 0
     finally:

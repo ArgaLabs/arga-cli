@@ -157,12 +157,18 @@ class NotAuthenticatedError(CliError):
 
 class ApiClient:
     def fidelity_request(
-        self, method: str, path: str, payload: dict | None = None, *, timeout: float | None = None
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        *,
+        timeout: float | None = None,
+        invocation_headers: dict[str, str] | None = None,
     ) -> dict:
         response = self._client.request(
             method,
             f"{self._api_url}/fidelity-gaps{path}",
-            headers=self._auth_headers(),
+            headers={**(invocation_headers or {}), **self._auth_headers()},
             json=payload,
             **({"timeout": timeout} if timeout is not None else {}),
         )

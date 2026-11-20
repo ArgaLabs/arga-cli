@@ -18,8 +18,8 @@ def client(monkeypatch):
         def close(self):
             calls.append("closed")
 
-        def fidelity_request(self, method, path, payload=None):
-            calls.append((method, path, payload))
+        def fidelity_request(self, method, path, payload=None, *, invocation_headers):
+            calls.append((method, path, payload, invocation_headers))
             return {"id": "id", "connector": "linear", "status": "submitted"}
 
     monkeypatch.setattr(main, "ApiClient", Client)
@@ -37,6 +37,10 @@ def test_submit_preserves_markdown_and_stable_retry_key(client, tmp_path, capsys
     assert first == second
     assert first["markdown"] == report.read_text()
     assert len(first["idempotency_key"]) == 64
+    first_headers, second_headers = client[0][3], client[2][3]
+    assert first_headers["X-Arga-CLI-Command"] == second_headers["X-Arga-CLI-Command"] == "submit"
+    assert uuid.UUID(first_headers["X-Arga-CLI-Invocation-ID"]).version == 4
+    assert first_headers["X-Arga-CLI-Invocation-ID"] != second_headers["X-Arga-CLI-Invocation-ID"]
     assert "test-key" not in capsys.readouterr().out
 
 
@@ -103,6 +107,7 @@ def test_invalid_file_is_rejected_before_upload(client, tmp_path):
 def test_wait_recovers_transient_failures_and_honors_short_interval_without_hint(monkeypatch, capsys):
     clock = {"now": 0.0}
     sleeps, timeouts = [], []
+    headers = []
     states = [
         main.RetryableApiError("temporary"),
         httpx.ConnectError("temporary"),
@@ -116,8 +121,9 @@ def test_wait_recovers_transient_failures_and_honors_short_interval_without_hint
         def close(self):
             pass
 
-        def fidelity_request(self, *_args, timeout=None):
+        def fidelity_request(self, *_args, timeout=None, invocation_headers):
             timeouts.append(timeout)
+            headers.append(invocation_headers)
             item = states.pop(0)
             if isinstance(item, Exception):
                 raise item
@@ -137,6 +143,8 @@ def test_wait_recovers_transient_failures_and_honors_short_interval_without_hint
     assert args.func(args) == 0
     assert sleeps == [0.25, 0.25]
     assert all(timeout <= 2 for timeout in timeouts)
+    assert headers == [headers[0]] * 3
+    assert headers[0]["X-Arga-CLI-Command"] == "wait"
     assert json.loads(capsys.readouterr().out)["status"] == "deployed"
 
 
@@ -162,6 +170,27 @@ def test_wait_exhaustion_is_local_timeout_with_unknown_remote_state(monkeypatch,
     result = json.loads(capsys.readouterr().out)
     assert result["poll_status"] == "timed_out" and result["status"] == "unknown"
     assert clock["now"] == 2
+
+
+def test_status_alias_sends_get_invocation_headers(monkeypatch, capsys):
+    requests = []
+
+    def response(request):
+        requests.append(request)
+        return httpx.Response(200, json={"id": "report", "status": "deployed"})
+
+    monkeypatch.setattr(main, "load_api_key", lambda: "fixture")
+    client = main.ApiClient("https://api.test", "fixture")
+    client._client.close()
+    client._client = httpx.Client(transport=httpx.MockTransport(response))
+    monkeypatch.setattr(main, "ApiClient", lambda *_args, **_kwargs: client)
+    args = main.build_parser().parse_args(["fidelity-gaps", "status", str(uuid.uuid4()), "--json"])
+
+    assert args.func(args) == 0
+    assert requests[0].headers["X-Arga-CLI-Command"] == "get"
+    assert uuid.UUID(requests[0].headers["X-Arga-CLI-Invocation-ID"]).version == 4
+    assert requests[0].headers["Authorization"] == "Bearer fixture"
+    assert json.loads(capsys.readouterr().out)["status"] == "deployed"
 
 
 @pytest.mark.parametrize("status", [429, 500, 503])
