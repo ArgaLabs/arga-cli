@@ -1,6 +1,6 @@
 # Arga CLI
 
-`arga` is the command-line interface for authenticating with Arga, installing MCP configuration into supported coding agents, and managing Arga previews, scenarios, saved browser tests, and live test runs.
+`arga` is the command-line interface for authenticating with Arga, installing MCP configuration into supported coding agents, and managing Twin Runs, Scenarios, Saved Tests, and browser Test Runs.
 
 ## What It Does
 
@@ -8,14 +8,14 @@
 - Stores a device-scoped API key locally so each terminal/device can be revoked independently.
 - Shows the currently authenticated user and workspace.
 - Installs MCP configuration into supported local agents.
-- Starts preview runs for URLs, PR checks, sandboxes, and twins.
+- Starts Twin Runs and executes browser tests against a reachable application URL.
 - Manages test-runner scenarios, saved tests, blocks, and run history.
 - Imports, exports, validates, and summarizes agent-editable TestConfig JSON.
 - Wraps `git commit` and `git push` with Arga skip-validation helpers.
 
 ## Installation 
 
-Once published to PyPI:
+Install the published package from PyPI:
 
 ```bash
 uv tool install arga-cli
@@ -63,85 +63,44 @@ Install MCP configuration for detected agents:
 arga mcp install
 ```
 
-Start a browser URL run:
-
-```bash
-arga test-runner runs url --url https://demo-app.com --prompt "test the login flow"
-```
-
-Start a PR check preview:
-
-```bash
-arga previews pr-checks run --repo arga-labs/validation-server --pr 182
-```
-
-Run a sandbox preview for a branch:
-
-```bash
-arga previews sandboxes run --repo arga-labs/app --branch feature/demo --twins slack,jira,linear
-arga previews sandboxes status <sandbox_id>
-arga previews sandboxes logs <sandbox_id>
-arga previews sandboxes teardown <sandbox_id>
-```
+Start a new browser test in the [web app](https://app.argalabs.com/test-runs) or through the [Test Runs API](https://docs.argalabs.com/api-reference/browser-agent-create-run). Use the CLI to replay saved flows and inspect results.
 
 Provision twins directly:
 
 ```bash
-arga previews twins list
-arga previews twins provision --twins salesforce,gitlab,linear,waterfall --ttl 60 --wait
-arga twin-runs create --twins google_drive,google_docs,google_sheets --ttl 60 --wait
-arga previews twins status <run_id>
-arga previews twins extend <run_id> --ttl 90
-arga previews twins lock <run_id>
-arga previews twins reset <run_id>
-arga previews twins teardown <run_id>
+arga twin-runs catalog
+TWIN_NAME=your-twin-id
+arga twin-runs create --twins "$TWIN_NAME" --wait
+arga twin-runs status <run_id>
+arga twin-runs extend <run_id> --ttl 90
+arga twin-runs lock <run_id>
+arga twin-runs reset <run_id>
+arga twin-runs teardown <run_id>
 ```
 
-GitHub includes Actions simulation by default. Eligible internal accounts can
-opt into executing supported workflows in the same GitHub twin:
+GitHub includes Actions simulation by default. When the catalog advertises execution, signed-in users can execute supported workflows in the same twin:
 
 ```bash
-arga twin-runs create --twins github --execute-github-actions --ttl 60 --wait
+arga twin-runs create --twins github --execute-github-actions --wait
 ```
 
-Execution automatically makes the run private. It requires enabled internal
-access and a verified `@argalabs.com` account. The legacy `github_actions` twin
-name remains accepted for compatibility; new workflows should select `github`.
+The flag requests a private run. See [GitHub Actions](https://docs.argalabs.com/features/github-actions) for setup and supported workflows.
 
 Create and run saved tests:
 
 ```bash
-arga test-runner tests create --name "Checkout" --run-id <demo_run_id> --repo arga-labs/app --ci
-arga test-runner tests run <test_id> --url https://preview.example.com
-arga test-runner tests run <test_id> --sandbox-id <sandbox_id>
+arga tests create --name "Checkout" --run-id <demo_run_id> --repo arga-labs/app
+arga tests run <test_id> --url https://preview.example.com
 ```
 
 Any of these commands accept `--json` for machine-parseable output:
 
 ```bash
-arga test-runner runs url --url https://demo-app.com --prompt "test login" --json
-arga test-runner tests list --json
-arga test-runner runs get <run_id> --json
+arga tests list --json
+arga test-runs get <run_id> --json
 ```
 
-Create a commit that skips Arga validation:
-
-```bash
-arga commit -m "docs: update examples" --skip
-arga push --skip
-```
-
-Inspect or update automatic validation settings:
-
-```bash
-arga previews pr-checks install arga-labs/validation-server
-arga previews pr-checks config arga-labs/validation-server --trigger branch
-arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
-arga previews pr-checks enabled
-arga previews pr-checks disable arga-labs/validation-server --trigger branch
-```
-
-List and inspect recent validation runs:
+Inspect historical validation runs:
 
 ```bash
 arga runs list --repo arga-labs/validation-server --limit 20
@@ -161,7 +120,7 @@ arga logout
 ```
 
 - `arga login` opens the browser to complete Arga's device authorization flow.
-- `arga whoami` verifies the saved API key and prints the GitHub login plus workspace.
+- `arga whoami` verifies the saved API key and prints the authenticated account and plan information.
 - `arga logout` removes the local credential and attempts to revoke the current device on the server.
 
 ### Choose a generation mode
@@ -169,7 +128,7 @@ arga logout
 Use `--generation-mode thorough` for complex prompt requirements when a longer wait is acceptable. Omit the flag for **Fast** generation, or pass `--generation-mode fast` explicitly.
 
 ```bash
-arga scenarios create \
+arga test-runner scenarios create \
   --name "Support escalation" \
   --prompt "A Slack support channel with linked escalation threads and consistent message authors" \
   --twin slack \
@@ -193,80 +152,67 @@ Scenario `import` and `update` also accept the flag. It overrides `generation_mo
 ```
 
 ```bash
-arga scenarios update <scenario-id> --file scenario-update.json --json
+arga test-runner scenarios update <scenario-id> --file scenario-update.json --json
 ```
 
-The mode applies only to new prompt generation. Saved scenario IDs and explicit seed JSON reuse their existing data. The compatibility commands `arga test-runner scenarios ...` and `arga previews twins provision` accept the same flag.
+The mode applies only to new prompt generation. Saved scenario IDs and explicit seed JSON reuse their existing data. Use `arga test-runner scenarios` for Scenario management. The shorter `arga scenarios` form remains available as an alias.
 
-### Previews
+### Twin Runs
 
 ```bash
-arga previews sandboxes run --repo arga-labs/app --branch feature/demo
-arga previews sandboxes status <sandbox_id>
-arga previews sandboxes logs <sandbox_id>
-arga previews sandboxes teardown <sandbox_id>
-arga previews pr-checks run --repo arga-labs/validation-server --pr 182
-arga previews twins list
-arga previews twins provision --twins slack,jira,linear,gitlab,salesforce,waterfall --ttl 60 --wait
-arga twin-runs create --twins google_drive,google_docs,google_sheets --ttl 60 --wait
-arga previews twins status <run_id>
-arga previews twins extend <run_id> --ttl 90
-arga previews twins lock <run_id>
-arga previews twins teardown <run_id>
-arga previews pr-checks install arga-labs/validation-server
-arga previews pr-checks config arga-labs/validation-server --trigger branch
-arga previews pr-checks config-set arga-labs/validation-server --trigger branch --branch main --comments on
-arga previews pr-checks enabled
-arga previews pr-checks enable arga-labs/validation-server --trigger branch
-arga previews pr-checks disable arga-labs/validation-server --trigger branch
+arga twin-runs catalog
+TWIN_NAME=your-twin-id
+arga twin-runs create --twins "$TWIN_NAME" --wait
+arga twin-runs status <run_id>
+arga twin-runs extend <run_id> --ttl 90
+arga twin-runs lock <run_id>
+arga twin-runs reset <run_id>
+arga twin-runs teardown <run_id>
 ```
 
-- `arga previews sandboxes run` starts a branch-backed or PR-backed sandbox preview. Use `--twins`, `--scenario-id`, `--ttl`, and repeated `--env KEY=VALUE` entries to shape the environment.
-- `arga previews sandboxes status/logs/teardown` inspect readiness, stream lifecycle events, or end a sandbox preview.
-- `arga previews pr-checks run` starts GitHub-backed PR validation for a repository and pull request number, PR URL, or branch.
-- `arga previews twins list` shows the supported twin catalog from `validation-server`.
-- `arga previews twins provision` provisions twins without running a browser test. Use `--scenario-id` or `--scenario-prompt` to seed them, `--private` to keep them behind proxy auth, and `--candidate-safe` to expose only provider data-plane APIs on the public candidate host. Candidate-safe runs hide the twin root/UI, twin-hosted documentation and OpenAPI/schema discovery, and control-plane routes; trusted authenticated admin URLs remain available for seeding and verification.
-- Google Drive, Google Docs, and Google Sheets are independent twins. Docs and Sheets each expose their provider-compatible API and an interactive editor UI. Provision all three when a `gws` workflow crosses service boundaries. Their preset Docs and Sheets resources use matching stable IDs, but mutations do not synchronize between twin processes.
-- `arga previews twins extend` / `lock` / `reset` / `teardown` adjust TTL, disable public access, reset seeded state, or end the quickstart session.
-- `arga previews pr-checks install/config/config-set/enabled/enable/disable` manage automatic PR check settings.
+- Use a catalog identifier for `TWIN_NAME`. On eligible plans, pass comma-separated identifiers to provision multiple twins in one run.
+- Add `--scenario-id` or `--scenario-prompt` to seed state. Add `--private` to require Arga proxy authorization.
+- Configure your software with the endpoints and credentials returned by the ready run. `arga twin-runs mcp-config <run_id>` generates client configuration for supported twin MCP endpoints.
+- `extend` moves the cleanup deadline, subject to your plan. `reset` restores the provisioning baseline. `teardown` queues cleanup. Poll until the status is `torn_down`.
 
-`arga validate` remains as a compatibility alias for older PR-check commands. New PR-check management commands are available only under `arga previews pr-checks`.
+See the [Twin Run guide](https://docs.argalabs.com/features/twins-quickstart) and [twin reference](https://docs.argalabs.com/concepts/twin-reference) for connection details.
 
-### Test Runner
+### Compatibility commands
+
+Existing `previews twins` commands remain available as aliases. The former hosted application preview and PR-check setup and start endpoints have been retired. For new workflows, run your application in your own environment and use `twin-runs`, `test-runs`, or `tests`.
+
+### Scenarios, Saved Tests, and browser Test Runs
 
 ```bash
 arga test-runner scenarios list --include-presets
 arga test-runner scenarios import --file scenario.json
 arga test-runner scenarios delete <scenario_id>
-arga test-runner tests list --repo arga-labs/app
-arga test-runner tests import --file saved-test.json
-arga test-runner tests edit <test_id>
-arga test-runner tests run <test_id> --url https://preview.example.com
-arga test-runner runs url --url https://demo-app.com --prompt "test login flow"
-arga test-runner runs url --sandbox-id <sandbox_id> --prompt "test login flow"
-arga test-runner runs list
-arga test-runner runs get <run_id>
-arga test-runner runs logs <run_id>
-arga test-runner runs rerun <run_id> --sandbox-id <sandbox_id>
-arga test-runner runs message <run_id> "Use test@example.com"
+arga tests list --repo arga-labs/app
+arga tests import --file saved-test.json
+arga tests edit <test_id>
+arga tests run <test_id> --url https://preview.example.com
+arga test-runs url --test-config test-config.json --url https://demo-app.com
+arga test-runs list
+arga test-runs get <run_id>
+arga test-runs logs <run_id>
+arga test-runs message <run_id> "Use test@example.com"
 ```
 
 - `scenarios` supports list/presets/get/create/import/export/update/delete for twin seed scenarios. Human-readable
   list/create/import/update output includes the server-recorded creation time; JSON output preserves `created_at`.
 - `arga test-runner scenarios presets` lists built-in presets from the public presets API without requiring login.
 - `tests` supports list/get/create/import/export/edit/delete/run for saved browser tests.
-- `runs` starts URL runs and inspects live demo-runner history/events.
-- `--sandbox-id` can attach URL runs, reruns, and saved-test runs to an existing sandbox preview.
-- `arga test url` and `arga scenarios ...` remain as compatibility aliases.
+- `test-runs` replays exported TestConfigs and inspects browser run history. In 0.1.24, prompt-only URL runs call a retired route. Submit a new prompt through the web app or Test Runs API.
+- `arga scenarios ...` remains a compatibility alias for `arga test-runner scenarios`.
 
 ### TestConfig JSON
 
 Agents should author saved tests by editing TestConfig JSON:
 
 ```bash
-arga test-runner tests config validate --file test_config.json
-arga test-runner tests config summarize --file test_config.json
-arga test-runner tests config normalize --file test_config.json --output test_config.json
+arga tests config validate --file test_config.json
+arga tests config summarize --file test_config.json
+arga tests config normalize --file test_config.json --output test_config.json
 ```
 
 Assertions are intentionally primitive and deterministic:
@@ -275,17 +221,7 @@ Assertions are intentionally primitive and deterministic:
 - `{"type": "url", "contains": "/checkout/success"}`
 - `{"type": "visible"}` plus a selector on the step
 
-For URL validation, you can optionally provide credentials:
-
-```bash
-arga test-runner runs url \
-  --url https://demo-app.com \
-  --prompt "log in and create an order" \
-  --email test@company.com \
-  --password supersecret
-```
-
-Both `--email` and `--password` must be supplied together.
+Use encrypted Saved Test credentials for reusable authenticated flows.
 
 ### Legacy Validation Runs
 
@@ -308,19 +244,7 @@ arga runs cancel <run_id>
 
 Both `runs list` and `runs status` accept `--json` for structured output.
 
-Use `arga test-runner runs ...` for the newer live browser test-runner run history.
-
-### Git Wrappers
-
-```bash
-arga commit -m "docs: update examples" --skip
-arga push --skip
-```
-
-- `arga commit` delegates to `git commit`.
-- `arga commit --skip` appends a final `[skip arga]` paragraph to the commit message so Arga skips validation for that head commit.
-- `arga push` delegates to `git push`.
-- `arga push --skip` verifies the current `HEAD` commit already contains `[skip arga]` before pushing. This is safest when the commit was created with `arga commit --skip`.
+Use `arga test-runs` for browser Test Run history.
 
 ## Supported MCP Targets
 
@@ -374,40 +298,26 @@ If you need to add the server manually, the generated config looks like:
 Key commands support `--json` for use in CI pipelines, shell scripts, and agent automation:
 
 ```bash
-# Capture the run ID from a validation
-RUN_ID=$(arga test-runner runs url --url https://app.example.com --prompt "test login" --json | jq -r .run_id)
-
-# Poll run status as JSON
-arga runs status "$RUN_ID" --json | jq .status
-
-# List runs as a JSON array
-arga runs list --repo arga-labs/validation-server --json | jq '.[].run_id'
-
-# Start PR validation and capture result
-arga previews pr-checks run --repo arga-labs/validation-server --pr 182 --json
+# Start a Saved Test and check its status
+RUN_ID=$(arga tests run "$TEST_ID" --url https://app.example.com --json | jq -er .id)
+arga test-runs get "$RUN_ID" --json | jq .status
 ```
 
 Commands that support `--json`:
 
 | Command | JSON shape |
 |---|---|
-| `arga test-runner runs url` | `{"run_id": "...", "status": "..."}` |
-| `arga previews pr-checks run` | `{"run_id": "...", "status": "..."}` |
-| `arga previews twins list` | Array of twin catalog items |
-| `arga previews twins status <id>` | Full twin provisioning status |
-| `arga test-runner tests list` | Array of saved tests |
-| `arga test-runner tests run <id>` | Demo runner run object |
+| `arga test-runs url --test-config <file>` | `{"run_id": "...", "status": "..."}` |
+| `arga twin-runs catalog` | Array of twin catalog items |
+| `arga twin-runs status <id>` | Full twin provisioning status |
+| `arga tests list` | Array of saved tests |
+| `arga tests run <id>` | Browser test run object |
 | `arga runs status <id>` | Full run object |
 | `arga runs list` | Array of run summaries |
 
-## Example Project
+## Documentation
 
-See [ArgaLabs/example-app](https://github.com/ArgaLabs/example-app) for a complete working example showing how to integrate Arga into a Next.js project with:
-
-- GitHub Actions CI validation on every PR
-- MCP config for Cursor and Claude Code
-- A shell script for manual validation
-- End-to-end walkthrough in the README
+See the [CLI guide](https://docs.argalabs.com/cli-and-mcp) for setup, supported commands, and examples.
 
 ## Using A Custom API URL
 
@@ -418,8 +328,7 @@ To point it at another environment, pass `--api-url` or set `ARGA_API_URL`:
 ```bash
 arga login --api-url http://localhost:8000
 arga mcp install --api-url http://localhost:8000
-arga test url --api-url http://localhost:8000 --url https://demo-app.com --prompt "test checkout"
-arga validate pr --api-url http://localhost:8000 --repo arga-labs/validation-server --pr 182
+arga twin-runs catalog --api-url http://localhost:8000
 ```
 
 ```bash
